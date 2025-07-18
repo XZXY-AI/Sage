@@ -1,6 +1,16 @@
 """
+“你是一名专业的足球比赛数据分析师。请对比赛ID为 3558764 的比赛进行一次全面的赛前分析。请遵循以下步骤：
+1. 获取比赛的基本信息、双方排名和积分。
+2. 获取双方的近期战绩和历史交锋记录。
+3. 获取比赛的阵容详情和欧盘、亚盘赔率。
+4. 最后，综合以上所有信息，给出一个包含基本面、战绩分析、赔率参考和最终结论的报告。”
 Sage Multi-Agent Demo
-
+请直接调用 get_league_standings 工具，并使用参数 match_id='3558764'
+请使用 get_match_list 工具，并设置参数 match_type 为 '1'
+请直接调用 get_match_list 工具，不要使用 execute_python_code。为 get_match_list 设置参数 match_type 为 '1'。
+streamlit run examples/sage_demo.py -- --api_key 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 --model anthropic/claude-3-haiku
+streamlit run examples/sage_demo.py -- --api_key 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 --model anthropic/claude-3-haiku
+streamlit run examples/sage_demo.py -- --api_key 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 --tools_folders ./tools
 智能多智能体协作演示应用
 主要优化：代码结构、错误处理、用户体验、性能
 """
@@ -123,8 +133,12 @@ class ComponentManager:
                 "temperature": self.settings.model.temperature,
                 "max_tokens": self.settings.model.max_tokens
             }
-            
-            controller = AgentController(self._model, model_config,workspace="/Users/zhangzheng/zavixai/Sage/examples")
+
+            workspace_path = os.path.join(project_root, "workspace")
+            os.makedirs(workspace_path, exist_ok=True)  # 这行能确保文件夹存在
+
+            # 使用这个新路径来初始化控制器
+            controller = AgentController(self._model, model_config, workspace=workspace_path)
             
             # 注册代码智能体
             try:
