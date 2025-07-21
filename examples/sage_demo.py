@@ -5,14 +5,9 @@
 3. 获取比赛的阵容详情和欧盘、亚盘赔率。
 4. 最后，综合以上所有信息，给出一个包含基本面、战绩分析、赔率参考和最终结论的报告。”
 Sage Multi-Agent Demo
-请直接调用 get_league_standings 工具，并使用参数 match_id='3558764'
-请使用 get_match_list 工具，并设置参数 match_type 为 '1'
-请直接调用 get_match_list 工具，不要使用 execute_python_code。为 get_match_list 设置参数 match_type 为 '1'。
-streamlit run examples/sage_demo.py -- --api_key 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 --model anthropic/claude-3-haiku
-streamlit run examples/sage_demo.py -- --api_key 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 --model anthropic/claude-3-haiku
-streamlit run examples/sage_demo.py -- --api_key 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 --tools_folders ./tools
 智能多智能体协作演示应用
 主要优化：代码结构、错误处理、用户体验、性能
+
 """
 
 import os
@@ -26,7 +21,7 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
 import streamlit as st
-from openai import OpenAI
+from openai import OpenAI, AzureOpenAI
 
 # 设置页面配置 - 必须在任何其他streamlit调用之前
 st.set_page_config(
@@ -110,19 +105,30 @@ class ComponentManager:
                 logger.warning(f"工具目录不存在: {folder}")
         
         return tool_manager
-    
+
     @with_retry(exponential_backoff(max_attempts=3, base_delay=1.0, max_delay=5.0))
     def _init_model(self) -> OpenAI:
         """初始化模型"""
         logger.debug(f"初始化模型，base_url: {self.settings.model.base_url}")
         try:
+            # vvv 新增的 Azure 处理逻辑 vvv
+            if "azure.com" in self.settings.model.base_url:
+                logger.info("检测到 Azure 配置，使用 AzureOpenAI 客户端")
+                return AzureOpenAI(
+                    api_key=self.settings.model.api_key,
+                    azure_endpoint=self.settings.model.base_url,
+                    api_version="2024-02-01"  # 建议使用一个稳定且常用的 api-version
+                )
+            # ^^^ 新增的 Azure 处理逻辑 ^^^
+
+            # 保留原来的逻辑作为默认选项
             return OpenAI(
                 api_key=self.settings.model.api_key,
                 base_url=self.settings.model.base_url
             )
         except Exception as e:
             logger.error(f"模型初始化失败: {str(e)}")
-            raise SageException(f"无法连接到 OpenAI API: {str(e)}")
+            raise SageException(f"无法连接到 API: {str(e)}")
     
     @with_retry(exponential_backoff(max_attempts=2, base_delay=0.5, max_delay=2.0))
     def _init_controller(self) -> AgentController:

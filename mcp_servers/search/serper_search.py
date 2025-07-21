@@ -5,6 +5,7 @@ from starlette.routing import Mount, Host
 import uvicorn
 from typing import List, Dict, Any,Union
 import argparse
+import json
 from openai import OpenAI
 import json
 import pypandoc
@@ -105,7 +106,7 @@ async def search_web_page(
                         "snippet": result["snippet"],
                     }
                 )
-            return results
+            return json.dumps(results, ensure_ascii=False, indent=2)
 
     except httpx.HTTPStatusError as e:
         return f"Bocha Web Search API HTTP error occurred: {e.response.status_code} - {e.response.text}"

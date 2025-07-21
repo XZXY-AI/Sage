@@ -8,10 +8,14 @@
             "env": {
                 "UV_INDEX_URL": "https://pypi.tuna.tsinghua.edu.cn/simple"
             },
-            "disabled": false
+            "disabled": true
         },
         "serper_web_search":{
             "sse_url":"http://127.0.0.1:34011/sse",
+            "disabled": false
+        },
+        "match_data_service": {
+            "sse_url": "http://127.0.0.1:34012/sse",
             "disabled": false
         }
     }
