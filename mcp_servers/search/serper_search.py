@@ -6,18 +6,7 @@ import uvicorn
 from typing import List, Dict, Any,Union
 import argparse
 import json
-from openai import OpenAI
-import json
-import pypandoc
-from pathlib import Path
-import pdfplumber
-import subprocess
-from pptx import Presentation
-import aspose.slides as slides
 import os
-import html2text
-import requests
-import asyncio
 mcp = FastMCP("Serper Search")
 
 parser = argparse.ArgumentParser(description='启动 MCP Server 并传入 API Key')
