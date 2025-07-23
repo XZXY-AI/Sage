@@ -117,7 +117,7 @@ class ComponentManager:
                 return AzureOpenAI(
                     api_key=self.settings.model.api_key,
                     azure_endpoint=self.settings.model.base_url,
-                    api_version="2024-02-01"  # 建议使用一个稳定且常用的 api-version
+                    api_version="2025-01-01-preview"  # 建议使用一个稳定且常用的 api-version
                 )
             # ^^^ 新增的 Azure 处理逻辑 ^^^
 
