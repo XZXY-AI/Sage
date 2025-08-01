@@ -25,7 +25,7 @@ from openai import OpenAI, AzureOpenAI
 
 # 设置页面配置 - 必须在任何其他streamlit调用之前
 st.set_page_config(
-    page_title="Sage Multi-Agent Framework",
+    page_title="新质向阳多智能体自动架构平台",
     page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -281,7 +281,7 @@ class StreamingHandler:
 
 def setup_ui():
     """设置用户界面"""
-    st.title("🧠 Sage Multi-Agent Framework")
+    st.title("🧠 新质向阳多智能体自动架构平台")
     st.markdown("**智能多智能体协作平台**")
     
     # 获取全局配置
