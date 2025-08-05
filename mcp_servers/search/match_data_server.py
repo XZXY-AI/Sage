@@ -220,13 +220,13 @@ def calculate_team_recent_10_games(matches: List[Dict], team_key: str = None) ->
                         left_score = int(left_score.strip())
                         right_score = int(right_score.strip())
                         
-                        # is_home=1表示队伍在左边（主队），is_home=0表示队伍在右边（客队）
+                        # 点球比分格式总是 主队:客队
                         if is_home == 1:  # 主队
                             if left_score > right_score:
                                 wins += 1
                             else:
                                 loses += 1
-                        else:  # 客队
+                        else:  # 客队 (is_home == 0)
                             if right_score > left_score:
                                 wins += 1
                             else:
