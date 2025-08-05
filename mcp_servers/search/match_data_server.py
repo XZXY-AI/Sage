@@ -166,6 +166,82 @@ async def get_match_details_by_id(
         traceback.print_exc()
         return f"An unexpected error occurred in get_match_essentials: [Type: {type(e).__name__}] - [Details: {repr(e)}]"
 
+# 辅助函数：计算单队近10场战绩
+def calculate_team_recent_10_games(matches: List[Dict], team_key: str = None) -> str:
+    """
+    计算队伍近10场比赛的胜负平统计
+    
+    Args:
+        matches: 比赛列表
+        team_key: 队伍标识，用于区分主客队（如果需要）
+    
+    Returns:
+        格式化的战绩字符串，如 '8Win2Lose0Draw'
+    """
+    if not matches or not isinstance(matches, list):
+        return "0Win0Lose0Draw"
+    
+    # 只取前10场比赛
+    recent_matches = matches[:10]
+    
+    wins = 0
+    loses = 0
+    draws = 0
+    
+    for match in recent_matches:
+        if not isinstance(match, dict):
+            continue
+            
+        result = match.get('result')
+        # 处理不同的字段名：penalty_score 或 penaltyScore
+        penalty_score = match.get('penalty_score') or match.get('penaltyScore', '')
+        # 处理不同的字段名：is_home 或 isHome
+        is_home = match.get('is_home') or match.get('isHome')
+        
+        # 确保result是整数类型
+        try:
+            result = int(result) if result is not None else None
+        except (ValueError, TypeError):
+            result = None
+            
+        if result == 3:  # 胜
+            wins += 1
+        elif result == 0:  # 负
+            loses += 1
+        elif result == 1:  # 需要进一步判断
+            if not penalty_score:  # 没有点球，则是平局
+                draws += 1
+            else:
+                # 有点球，根据is_home和penalty_score判断胜负
+                # penalty_score格式可能是 "4:2" 或类似格式
+                if isinstance(penalty_score, str) and ':' in penalty_score:
+                    try:
+                        left_score, right_score = penalty_score.split(':')
+                        left_score = int(left_score.strip())
+                        right_score = int(right_score.strip())
+                        
+                        # is_home=1表示队伍在左边（主队），is_home=0表示队伍在右边（客队）
+                        if is_home == 1:  # 主队
+                            if left_score > right_score:
+                                wins += 1
+                            else:
+                                loses += 1
+                        else:  # 客队
+                            if right_score > left_score:
+                                wins += 1
+                            else:
+                                loses += 1
+                    except (ValueError, AttributeError):
+                        # 如果解析点球比分失败，默认为平局
+                        draws += 1
+                else:
+                    # 如果点球比分格式不正确，默认为平局
+                    draws += 1
+        # 其他result值默认不统计
+    
+    return f"{wins}Win{loses}Lose{draws}Draw"
+
+
 # http://ai-match.fengkuangtiyu.cn/api/v5/matches/3558764/recent_forms?match_type=1
 # 获取比赛近期战绩
 # 调用工具根据比赛 3558764获取他的近期战绩
@@ -197,7 +273,31 @@ async def get_team_recent_performance_by_match_id(
         async with httpx.AsyncClient() as client:
             response = await client.get(endpoint, params=params)
             response.raise_for_status()
-            return response.json()
+            original_data = response.json()
+            
+            # 如果API返回成功，添加近10场战绩统计
+            if isinstance(original_data, dict) and original_data.get("code") == "0":
+                data = original_data.get("data", {})
+                
+                # 处理主队近期战绩 - API返回的home_team直接是数组
+                if "home_team" in data and isinstance(data["home_team"], list):
+                    home_matches = data["home_team"]
+                    home_recent_10 = calculate_team_recent_10_games(home_matches)
+                    # 将统计结果添加到data层级
+                    data["home_team_recent10Games"] = home_recent_10
+                
+                # 处理客队近期战绩 - API返回的guest_team直接是数组  
+                if "guest_team" in data and isinstance(data["guest_team"], list):
+                    guest_matches = data["guest_team"]
+                    guest_recent_10 = calculate_team_recent_10_games(guest_matches)
+                    # 将统计结果添加到data层级
+                    data["guest_team_recent10Games"] = guest_recent_10
+                
+                # 更新原始数据
+                original_data["data"] = data
+            
+            return original_data
+            
     except httpx.HTTPStatusError as e:
         return f"API request failed with status {e.response.status_code}: {e.response.text}"
     except Exception as e:
