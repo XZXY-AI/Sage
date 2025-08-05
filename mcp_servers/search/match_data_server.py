@@ -232,11 +232,11 @@ def calculate_team_recent_10_games(matches: List[Dict], team_key: str = None) ->
                             else:
                                 loses += 1
                     except (ValueError, AttributeError):
-                        # 如果解析点球比分失败，默认为平局
-                        draws += 1
+                        # 如果解析点球比分失败，默认为负
+                        loses += 1
                 else:
-                    # 如果点球比分格式不正确，默认为平局
-                    draws += 1
+                    # 如果点球比分格式不正确，默认为负
+                    loses += 1
         # 其他result值默认不统计
     
     return f"{wins}Win{loses}Lose{draws}Draw"
