@@ -165,7 +165,8 @@ async def get_match_details_by_id(
         print(f"--- DETAILED ERROR IN get_match_essentials ---")
         traceback.print_exc()
         return f"An unexpected error occurred in get_match_essentials: [Type: {type(e).__name__}] - [Details: {repr(e)}]"
-
+# 请调用 get_team_recent_performance_by_match_id 工具，参数为 match_id: "3566777"，总结一下这个比赛的双方近期战绩结果。
+import re
 # 辅助函数：计算单队近10场战绩
 def calculate_team_recent_10_games(matches: List[Dict], team_key: str = None) -> str:
     """
@@ -198,44 +199,69 @@ def calculate_team_recent_10_games(matches: List[Dict], team_key: str = None) ->
         # 处理不同的字段名：is_home 或 isHome
         is_home = match.get('is_home') or match.get('isHome')
         
-        # 确保result是整数类型
+        print(f"DEBUG: 处理比赛 - date: {match.get('date')}, result: {result}, penalty_score: {penalty_score}, is_home: {is_home}")
+        
+        # 确保result和is_home都是整数类型
         try:
             result = int(result) if result is not None else None
         except (ValueError, TypeError):
             result = None
             
+        try:
+            is_home = int(is_home) if is_home is not None else None
+        except (ValueError, TypeError):
+            is_home = None
+            
+        print(f"DEBUG: 转换后 - result: {result}, is_home: {is_home}")
+            
         if result == 3:  # 胜
             wins += 1
+            print(f"DEBUG: result=3, 胜")
         elif result == 0:  # 负
             loses += 1
+            print(f"DEBUG: result=0, 负")
         elif result == 1:  # 需要进一步判断
+            print(f"DEBUG: result=1, 检查点球")
             if not penalty_score:  # 没有点球，则是平局
                 draws += 1
+                print(f"DEBUG: 无点球, 平局")
             else:
+                print(f"DEBUG: 有点球: {penalty_score}")
                 # 有点球，根据is_home和penalty_score判断胜负
                 # penalty_score格式可能是 "4:2" 或类似格式
-                if isinstance(penalty_score, str) and ':' in penalty_score:
+                split_pattern = r'[\-–—−]'
+                score_parts = re.split(split_pattern, penalty_score)
+                if len(score_parts) == 2:  # 确保分割后正好是两部分
                     try:
-                        left_score, right_score = penalty_score.split(':')
-                        left_score = int(left_score.strip())
-                        right_score = int(right_score.strip())
-                        
-                        # 点球比分格式总是 主队:客队
-                        if is_home == 1:  # 主队
+                        left_score = int(score_parts[0].strip())
+                        right_score = int(score_parts[1].strip())
+
+                        print(
+                            f"DEBUG: 点球处理 - date: {match.get('date')}, is_home: {is_home}, penalty: {penalty_score}, left: {left_score}, right: {right_score}")
+
+                        if is_home == 1:
                             if left_score > right_score:
                                 wins += 1
+                                print(f"DEBUG: 主队点球胜")
                             else:
                                 loses += 1
-                        else:  # 客队 (is_home == 0)
+                                print(f"DEBUG: 主队点球负")
+                        elif is_home == 0:
                             if right_score > left_score:
                                 wins += 1
+                                print(f"DEBUG: 客队点球胜")
                             else:
                                 loses += 1
-                    except (ValueError, AttributeError):
-                        # 如果解析点球比分失败，默认为负
+                                print(f"DEBUG: 客队点球负")
+                        else:
+                            loses += 1
+                            print(f"DEBUG: is_home值无效，计为负")
+
+                    except (ValueError, AttributeError) as e:
+                        print(f"DEBUG: 点球解析异常 - {e}，计为负")
                         loses += 1
                 else:
-                    # 如果点球比分格式不正确，默认为负
+                    print(f"DEBUG: 点球格式分割后部分不为2，计为负")
                     loses += 1
         # 其他result值默认不统计
     
