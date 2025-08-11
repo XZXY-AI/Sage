@@ -366,6 +366,119 @@ async def get_football_squad_by_match_id(
         return f"An unexpected error occurred in get_squad_details: [Type: {type(e).__name__}] - [Details: {repr(e)}]"
 
 
+def calculate_h2h_summary(matches: List[Dict], team1_name: str, team2_name: str) -> Dict[str, Any]:
+    """
+    计算历史交锋汇总信息
+    
+    Args:
+        matches: 历史交锋比赛列表
+        team1_name: 队伍1名称
+        team2_name: 队伍2名称
+    
+    Returns:
+        包含total_matches, team1, team2, draw的汇总信息
+    """
+    if not matches or not isinstance(matches, list):
+        return {
+            "total_matches": 0,
+            "team1": f"{team1_name} 0胜",
+            "team2": f"{team2_name} 0胜", 
+            "draw": 0
+        }
+    
+    team1_wins = 0
+    team2_wins = 0
+    draws = 0
+    
+    for match in matches:
+        if not isinstance(match, dict):
+            continue
+            
+        result = match.get('result') or match.get('match_result')
+        penalty_score = match.get('penalty_score') or match.get('penaltyScore', '')
+        is_home = match.get('is_home') or match.get('isHome')
+        home_team_name = match.get('home_team_name') or match.get('home_team', '')
+        guest_team_name = match.get('guest_team_name') or match.get('away_team', '')
+        
+        # 确保result和is_home都是整数类型
+        try:
+            result = int(result) if result is not None else None
+        except (ValueError, TypeError):
+            result = None
+            
+        try:
+            is_home = int(is_home) if is_home is not None else None
+        except (ValueError, TypeError):
+            is_home = None
+            
+        # 判断当前比赛中team1是主队还是客队
+        team1_is_home = (home_team_name == team1_name)
+        
+        if result == 3:  # 胜
+            if team1_is_home:
+                team1_wins += 1
+            else:
+                team2_wins += 1
+        elif result == 0:  # 负
+            if team1_is_home:
+                team2_wins += 1
+            else:
+                team1_wins += 1
+        elif result == 1:  # 需要进一步判断
+            if not penalty_score:  # 没有点球，则是平局
+                draws += 1
+            else:
+                # 有点球，根据is_home和penalty_score判断胜负
+                split_pattern = r'[\-–—−]'
+                score_parts = re.split(split_pattern, penalty_score)
+                if len(score_parts) == 2:
+                    try:
+                        left_score = int(score_parts[0].strip())
+                        right_score = int(score_parts[1].strip())
+
+                        # 主队点球胜
+                        if is_home == 1 and left_score > right_score:
+                            if team1_is_home:
+                                team1_wins += 1
+                            else:
+                                team2_wins += 1
+                        # 主队点球负
+                        elif is_home == 1 and left_score < right_score:
+                            if team1_is_home:
+                                team2_wins += 1
+                            else:
+                                team1_wins += 1
+                        # 客队点球胜
+                        elif is_home == 0 and right_score > left_score:
+                            if team1_is_home:
+                                team2_wins += 1
+                            else:
+                                team1_wins += 1
+                        # 客队点球负
+                        elif is_home == 0 and right_score < left_score:
+                            if team1_is_home:
+                                team1_wins += 1
+                            else:
+                                team2_wins += 1
+                        else:
+                            draws += 1  # 默认计为平局
+
+                    except (ValueError, AttributeError):
+                        draws += 1  # 解析失败计为平局
+                else:
+                    draws += 1  # 格式异常计为平局
+    
+    total_matches = len(matches)
+    
+    return {
+        "total_matches": total_matches,
+        "team1": f"{team1_name} {team1_wins}胜",
+        "team2": f"{team2_name} {team2_wins}胜",
+        "draw": draws
+    }
+
+
+#  请调用 get_head_to_head_history_by_match_id 工具，参数为 match_id: "3558764"
 @mcp.tool()
 async def get_head_to_head_history_by_match_id(
         match_id: str,
@@ -411,7 +524,39 @@ async def get_head_to_head_history_by_match_id(
         async with httpx.AsyncClient() as client:
             response = await client.get(endpoint, params=params)
             response.raise_for_status()
-            return response.json()
+            original_data = response.json()
+            
+            # 如果API返回成功，添加历史交锋汇总信息
+            if isinstance(original_data, dict) and original_data.get("code") == "0":
+                data = original_data.get("data", {})
+                
+                # 获取比赛信息以确定队伍名称（兼容不同的字段名）
+                matches = data.get("matches", []) or data.get("recent_matches", [])
+                if matches and len(matches) > 0:
+                    # 从第一场比赛获取队伍名称（兼容不同的字段名）
+                    first_match = matches[0]
+                    team1_name = first_match.get('home_team_name') or first_match.get('home_team', 'Team1')
+                    team2_name = first_match.get('guest_team_name') or first_match.get('away_team', 'Team2')
+                    
+                    # 计算汇总信息
+                    summary = calculate_h2h_summary(matches, team1_name, team2_name)
+                    
+                    # 将汇总信息添加到data层级
+                    data["summary"] = summary
+                else:
+                    # 如果没有比赛数据，提供默认汇总
+                    data["summary"] = {
+                        "total_matches": 0,
+                        "team1": "Team1 0胜",
+                        "team2": "Team2 0胜",
+                        "draw": 0
+                    }
+                
+                # 更新原始数据
+                original_data["data"] = data
+            
+            return original_data
+            
     except httpx.HTTPStatusError as e:
         return f"API request failed with status {e.response.status_code}: {e.response.text}"
     except Exception as e:
