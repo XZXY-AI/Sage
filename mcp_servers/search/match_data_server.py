@@ -781,6 +781,48 @@ async def generate_full_match_report_by_id(match_id: str) -> Union[Dict[str, Any
         return f"生成完整报告时发生严重错误: {error_details}"
 
 
+# 请调用 get_upcoming_competitive_matches 工具，match_type 为 "1"，直接调用，不要使用其他工具
+@mcp.tool()
+async def get_upcoming_competitive_matches(
+        match_type: str
+) -> Union[List[Dict[str, Any]], str]:
+    """
+    获取竞彩足球和篮球未开始的比赛列表。
+    Fetches upcoming competitive football and basketball matches that haven't started yet.
+
+    Args:
+        match_type (str): 体育类型，必需参数。1 代表竞彩足球, 2 代表竞彩篮球。
+
+    Returns:
+        Union[List[Dict[str, Any]], str]: 成功时返回未开始比赛列表，失败时返回错误信息字符串。
+    """
+    endpoint = "http://ai-match.fengkuangtiyu.cn/api/v5/matches/getNotStartMatch"
+    params = {"match_type": match_type}
+    
+    print(f"Executing get_upcoming_competitive_matches with params: {params}")
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(endpoint, params=params)
+            response.raise_for_status()
+
+            data = response.json()
+            # Check if the API call was successful
+            if data.get("code") == "0":
+                # If successful, return the data list
+                return data.get("data", [])
+            else:
+                # If the API returned an error, return error message
+                return f"API returned an error: {data.get('msg', 'Unknown error')}"
+
+    except httpx.HTTPStatusError as e:
+        return f"API request failed with status {e.response.status_code}: {e.response.text}"
+    except Exception as e:
+        print(f"--- DETAILED ERROR IN get_upcoming_competitive_matches ---")
+        traceback.print_exc()
+        return f"An unexpected error occurred in get_upcoming_competitive_matches: [Type: {type(e).__name__}] - [Details: {repr(e)}]"
+
+
 # 4. 启动 Web 服务器的代码 (不变)
 if __name__ == "__main__":
     app = Starlette(
