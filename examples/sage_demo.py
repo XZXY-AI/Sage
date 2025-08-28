@@ -25,7 +25,7 @@ from openai import OpenAI, AzureOpenAI
 
 # 设置页面配置 - 必须在任何其他streamlit调用之前
 st.set_page_config(
-    page_title="新质向阳多智能体自动架构平台",
+    page_title="Sage",
     page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -51,6 +51,30 @@ from sagents.utils import (
     exponential_backoff,
     handle_exception
 )
+
+# 定义预设提示词常量
+MATCH_PREDICTION_PROMPT = """
+agent 总体目标 当用户输入一场或多场比赛的关键信息（如时间、联赛、对阵双方，或只给日期/队名）时： 1）自动用 MCP 工具获取完整比赛数据； 2）一步一步分析（积分形势、战意、阵容、近况、交锋、赔率等）； 3）最终输出一篇结构清晰、观点明确的中文赛事分析文章，并给出倾向性判断（如主胜/主负/大小球方向等）。
+1 解析用户输入 任务：从用户自然语言中抽取：比赛类型（足球）、日期或比赛ID、对阵双方、联赛名称等关键信息。
+2 用 query_match_list_by_date 找到比赛ID 目的：当用户没有给出 match_id 时，根据日期/队名/联赛查找目标比赛，锁定唯一 match_id。 调用：query_match_list_by_date(match_type=1, date=?, league_ids=?, team_id=?, status=1)。 参考：函数用途与参数说明。 拿到结果后：筛出与用户描述最匹配的那场比赛（主队、客队、时间一致）。若多场相似，向用户澄清。
+3 用 get_match_details_by_id 获取核心信息 目的：确认比赛时间、场地等，away是客队，home是主队 调用：get_match_details_by_id(match_id, match_type=1)。
+4 用 get_match_standings_by_id 看积分&排名 目的：分析战意（保级/争四/欧战资格）。 调用：get_match_standings_by_id(match_id, match_type=1)。 5 用 get_team_recent_performance_by_match_id 看近期战绩 目的：获取双方近几场（一般 5~10 场）的胜平负、进失球趋势。 调用：get_team_recent_performance_by_match_id(match_id, match_type=1)。 参考：收到的数据中分主客场，需要把队伍分别对应上
+6 用 get_head_to_head_history_by_match_id 查交锋 目的：查看双方历史交锋，默认根据比赛的的那一天查一年，在调用的时候把start date设为一年期，end date为比赛那天。 调用：get_head_to_head_history_by_match_id(match_id, start_date?, end_date?, match_type=1)。
+7 调用 get_football_squad_by_match_id(match_id) 解析主客队“伤病/停赛/复出/存疑”；
+8 用 get_europe_odds_by_match_id 拉欧赔 目的：欧赔胜平负的初赔与即时赔，判断市场倾向。 调用：get_europe_odds_by_match_id(match_id, match_type=1)。
+9 用 get_asian_handicap_odds_by_match_id 看亚盘 目的：查看让球盘口及变盘（升/降水、盘口深浅）。 调用：get_asian_handicap_odds_by_match_id(match_id, match_type=1)。
+10 用 get_over_under_odds_by_match_id 看大小球 目的：获取大小球（Goal Line）初盘及变化。 调用：get_over_under_odds_by_match_id(match_id, match_type=1)。
+11 爆冷分析 目的：整合前面各步结果，分析各类爆冷因素，为最终成品写作提供参考。 分析逻辑：1、一方多线作战，比赛结果对当前联赛的排名没有太大影响。2、赛程密集或阵容伤病严重导致体能损耗严重。3、极端恶劣天气。4、弱队在保级、晋级或杯赛淘汰制一般都会有更强的战意5、主场优势。6、球队突发情况，例如欠薪被曝光、俱乐部丑闻等。
+12 综合写作与输出 目的：整合前面各步结果，写出成品，并给出明确倾向，最终用markdown格式输出。 无工具调用：整理文字。写作要求：1 先用一段话概述本场比赛的背景和悬念。2 按“主队→客队”顺序，结合数据评估球队近况、战术特点、精神属性。3 重点说明伤停、轮换、战意对结果的潜在影响。4 分析中引用关键数据作为论据，但不要堆砌。5 结尾给出：最可能赛果包括胜负和比分和1 2 句风险提示，体现客观性。6 全文 400 600 字左右即可，无需标题写成分段的连贯文章，段落按照赛事基本信息-主队信息-客队信息-交战信息-赔率信息-比赛预测分段即可，最后全文用markdown格式输出。
+"""
+
+BETTING_RECOMMENDATION_PROMPT = """
+你是足球投注组合规划师。当用户给出日期/联赛/队名/预算/偏好时：先调用 get_upcoming_competitive_matches(match_type="1") 获取所有的候选比赛；在本地基于用户条件（日期/联赛/队名）对候选做筛选与去重，得到目标 match_id 集合；逐场用其余 MCP 工具拉取细项（详情/积分/近况/欧赔/亚盘/大小球）；不写长评，直接产出三套组合（稳健/平衡/博冷）+ 资金分配/避坑，并给出赔率乘积与 100 元示例回报。
+1 解析用户输入 任务：从用户自然语言中抽取：比赛类型（足球）、日期以及想要下注的时间等关键信息。
+2 候选检索 get_upcoming_competitive_matches(match_type: 1) 传参：match_type="1"（足球）。找到所有可以投注的赛事列表，然后按照用户的要求汇总成一个match_id集合，若用户无明确要求则默认选12个match_id构成集合。
+3 针对match_id集合里的每一个match_id，都去执行如下步骤： 3.1 用 get_match_details_by_id 获取核心信息 目的：确认比赛时间、场地等，away是客队，home是主队，一定要按照home和away将比赛双方和队伍对齐。 调用：get_match_details_by_id(match_id, match_type=1)。 3.2 用 get_match_standings_by_id 看积分&排名 目的：分析战意（保级/争四/欧战资格）。 调用：get_match_standings_by_id(match_id, match_type=1)。 3.3 用 get_team_recent_performance_by_match_id 看近期战绩 目的：获取双方近几场（一般 5~10 场）的胜平负、进失球趋势。 调用：get_team_recent_performance_by_match_id(match_id, match_type=1)。 参考：收到的数据中分主客场，需要把队伍分别对应上 3.4 用 get_europe_odds_by_match_id 拉欧赔 目的：欧赔胜平负的初赔与即时赔，判断市场倾向。 调用：get_europe_odds_by_match_id(match_id, match_type=1)。 3.5 用 get_asian_handicap_odds_by_match_id 看亚盘 目的：查看让球盘口及变盘（升/降水、盘口深浅）。 调用：get_asian_handicap_odds_by_match_id(match_id, match_type=1)。 3.6 用 get_over_under_odds_by_match_id 看大小球 目的：获取大小球（Goal Line）初盘及变化。 调用：get_over_under_odds_by_match_id(match_id, match_type=1)。 当调用完成后，针对每一个match_id，生成一个赛事简报，用于支撑最后的投注建议。
+4 综合写作与输出 目的：整合前面各步结果，写出成品，并给出明确倾向，最终用markdown格式输出。 无工具调用：整理文字。写作要求：输出格式（Markdown · 仅输出组合，不写长评，每场比赛附带比赛日期） 一、基础组合原则 避免全热门； 强弱搭配 + 防平局（芬超/瑞超/德比常有高平率）； 分散联赛和开赛时段，降低相关性； 临场如阵容突发或赔率剧烈波动，优先替换/剔除。 二、实战组合方案（按风险排序） 统一表头： 场次 | 选择理由 | 推荐选项 行例：联赛 缩写·HH:MM 主 vs 客 | 近5主队4胜；客场胜率20% | 主胜(1.65) 方案1：稳健型（3串1，预计赔率 3–5 倍） 表格列出 3 行；末尾写“优势 / 100 元→约 [乘积] 倍”。 方案2：平衡型（4串1，预计赔率 8–12 倍） 表格列出 4 行；至少 1 行为双选（如“平/负(1.xx)”）；末尾给优势与示例回报。 方案3：博冷型（3串4，容错玩法） 列出 3 行高赔方向；解释 3串4 拆分与盈亏阈值；举“中两场”的乘积示例。 三、关键数据辅助决策 给 3–5 条最关键事实（德比平率、赔变方向、主客近况），每条一行，不堆砌。
+"""
 
 
 class ComponentManager:
@@ -284,38 +308,6 @@ def setup_ui():
     st.title("Sage：Muti-Agent Framework")
     st.markdown("**智能多智能体协作平台**")
 
-    # 获取全局配置
-    settings = get_settings()
-    
-    # 侧边栏设置
-    # with st.sidebar:
-    #     st.header("⚙️ 设置")
-        
-    #     # 多智能体选项
-    #     use_multi_agent = st.toggle('🤖 启用多智能体推理', 
-    #                                value=False)
-    #     use_deepthink = st.toggle('🧠 启用深度思考', 
-    #                              value=settings.agent.enable_deep_thinking)
-        
-    #     # 系统信息
-    #     st.subheader("📊 系统信息")
-    #     st.info(f"**模型**: {settings.model.model_name}")
-    #     st.info(f"**温度**: {settings.model.temperature}")
-    #     st.info(f"**最大标记**: {settings.model.max_tokens}")
-    #     st.info(f"**环境**: {settings.environment}")
-        
-    #     # 工具列表
-    #     if st.session_state.get('tool_manager'):
-    #         display_tools(st.session_state.tool_manager)
-        
-    #     # 清除历史按钮
-    #     if st.button("🗑️ 清除对话历史", type="secondary"):
-    #         clear_history()
-    use_multi_agent=False
-    use_deepthink = settings.agent.enable_deep_thinking
-    
-    return use_multi_agent, use_deepthink
-
 
 def display_tools(tool_manager: ToolManager):
     """显示可用工具"""
@@ -362,7 +354,16 @@ def display_conversation_history():
 def process_user_input(user_input: str, tool_manager: ToolManager, controller: AgentController):
     """处理用户输入"""
     logger.info(f"处理用户输入: {user_input[:50]}{'...' if len(user_input) > 50 else ''}")
-    
+
+    # 检查是否为第一次对话，如果是，则拼接预设提示词
+    if not st.session_state.conversation:
+        if st.session_state.agent_mode == '赛事预测':
+            user_input = f"{MATCH_PREDICTION_PROMPT}\n\n用户问题：{user_input}"
+            logger.info("拼接赛事预测提示词")
+        elif st.session_state.agent_mode == '投注推荐':
+            user_input = f"{BETTING_RECOMMENDATION_PROMPT}\n\n用户问题：{user_input}"
+            logger.info("拼接投注推荐提示词")
+
     # 创建用户消息
     user_msg = create_user_message(user_input)
     
@@ -443,11 +444,7 @@ def run_web_demo(api_key: str, model_name: str = None, base_url: str = None,
     init_session_state()
     
     # 设置界面（此时能获取到正确的配置）
-    use_multi_agent, use_deepthink = setup_ui()
-    
-    # 存储设置到会话状态
-    st.session_state.use_multi_agent = use_multi_agent
-    st.session_state.use_deepthink = use_deepthink
+    setup_ui()
     
     # 初始化组件（只执行一次）
     if not st.session_state.components_initialized:
@@ -497,18 +494,39 @@ def run_web_demo(api_key: str, model_name: str = None, base_url: str = None,
     # 显示历史对话
     display_conversation_history()
     
-    # 在输入框上方添加下拉菜单
-    menu_option = st.selectbox("请选择功能", ("赛事预测", "投注推荐"), key="menu_option")
+    # 获取全局配置
+    settings = get_settings()
+
+    # 使用可展开容器将模式选择与聊天输入框在视觉上关联
+    with st.expander("⚙️ 智能体模式设置", expanded=True):
+        st.session_state.agent_mode = st.selectbox(
+            '请选择智能体模式:',
+            ('赛事预测', '投注推荐'),
+            label_visibility="collapsed" # 隐藏标签，因为标题已说明
+        )
+
+        # 根据下拉菜单选项设置配置
+        if st.session_state.agent_mode == '赛事预测':
+            use_deepthink = True
+            use_multi_agent = False
+        elif st.session_state.agent_mode == '投注推荐':
+            use_deepthink = True
+            use_multi_agent = False
+        else:
+            # 默认配置
+            use_deepthink = settings.agent.enable_deep_thinking
+            use_multi_agent = False
+
+        # 存储设置到会话状态
+        st.session_state.use_multi_agent = use_multi_agent
+        st.session_state.use_deepthink = use_deepthink
     
     # 处理用户输入
     user_input = st.chat_input("💬 请输入您的问题...")
     
     if user_input and user_input.strip():
-        # 根据选择的功能处理输入
-        selected_function = st.session_state.get('menu_option', '赛事预测')
-        enhanced_input = f"[{selected_function}] {user_input.strip()}"
         process_user_input(
-            enhanced_input, 
+            user_input.strip(), 
             st.session_state.tool_manager, 
             st.session_state.controller
         )
