@@ -507,7 +507,7 @@ def run_web_demo(api_key: str, model_name: str = None, base_url: str = None,
         # 根据下拉菜单选项设置配置
         if st.session_state.agent_mode == '赛事预测':
             use_deepthink = True
-            use_multi_agent = False
+            use_multi_agent = True
         elif st.session_state.agent_mode == '投注推荐':
             use_deepthink = True
             use_multi_agent = False
