@@ -25,7 +25,7 @@ from openai import OpenAI, AzureOpenAI
 
 # 设置页面配置 - 必须在任何其他streamlit调用之前
 st.set_page_config(
-    page_title="Sage",
+    page_title="新质向阳多智能体平台",
     page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -192,24 +192,26 @@ def convert_messages_for_show(messages: List[Dict[str, Any]]) -> List[Dict[str, 
     new_messages = []
     
     for message in messages:
-        if not message.get('show_content'):
+        content_to_show = message.get('show_content', message.get('content'))
+        if not content_to_show:
             continue
             
         new_message = {
             'message_id': message.get('message_id', str(uuid.uuid4())),
             'role': 'assistant' if message['role'] != 'user' else 'user',
-            'content': message.get('show_content')
+            'content': content_to_show
         }
         new_messages.append(new_message)
         
     return new_messages
 
 
-def create_user_message(content: str) -> Dict[str, Any]:
+def create_user_message(content: str, show_content: Optional[str] = None) -> Dict[str, Any]:
     """创建用户消息"""
     return {
         "role": "user",
         "content": content,
+        "show_content": show_content if show_content is not None else content,
         "type": "normal",
         "message_id": str(uuid.uuid4())
     }
@@ -355,21 +357,24 @@ def process_user_input(user_input: str, tool_manager: ToolManager, controller: A
     """处理用户输入"""
     logger.info(f"处理用户输入: {user_input[:50]}{'...' if len(user_input) > 50 else ''}")
 
+    full_prompt = user_input
     # 检查是否为第一次对话，如果是，则拼接预设提示词
     if not st.session_state.conversation:
         if st.session_state.agent_mode == '赛事预测':
-            user_input = f"{MATCH_PREDICTION_PROMPT}\n\n用户问题：{user_input}"
+            full_prompt = f"{MATCH_PREDICTION_PROMPT}\n\n用户问题：{user_input}"
             logger.info("拼接赛事预测提示词")
         elif st.session_state.agent_mode == '投注推荐':
-            user_input = f"{BETTING_RECOMMENDATION_PROMPT}\n\n用户问题：{user_input}"
+            full_prompt = f"{BETTING_RECOMMENDATION_PROMPT}\n\n用户问题：{user_input}"
             logger.info("拼接投注推荐提示词")
 
     # 创建用户消息
-    user_msg = create_user_message(user_input)
+    user_msg = create_user_message(full_prompt, show_content=user_input)
     
-    # 添加到对话历史
-    st.session_state.conversation.append(user_msg)
+    # 添加到推理对话历史
     st.session_state.inference_conversation.append(user_msg)
+    
+    # 更新显示对话历史
+    st.session_state.conversation.append({'role': 'user', 'content': user_input})
     
     # 显示用户消息
     with st.chat_message("user"):
