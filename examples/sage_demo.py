@@ -307,7 +307,7 @@ class StreamingHandler:
 
 def setup_ui():
     """设置用户界面"""
-    st.title("Sage：Muti-Agent Framework")
+    st.title("新质向阳多智能体平台")
     st.markdown("**智能多智能体协作平台**")
 
 
