@@ -59,7 +59,7 @@ MATCH_PREDICTION_PROMPT = """
 2 用 query_match_list_by_date 找到比赛ID 目的：当用户没有给出 match_id 时，根据日期/队名/联赛查找目标比赛，锁定唯一 match_id。 调用：query_match_list_by_date(match_type=1, date=?, league_ids=?, team_id=?, status=1)。 参考：函数用途与参数说明。 拿到结果后：筛出与用户描述最匹配的那场比赛（主队、客队、时间一致）。若多场相似，向用户澄清。
 3 针对确定的match_id去执行以下步骤获取比赛基本信息：3.1 用 get_match_details_by_id 获取核心信息 目的：确认比赛时间、场地等，away是客队，home是主队 调用：get_match_details_by_id(match_id, match_type=1)。3.2用 get_match_standings_by_id 看积分&排名 目的：分析战意（保级/争四/欧战资格）。 调用：get_match_standings_by_id(match_id, match_type=1)。 3.3 用 get_team_recent_performance_by_match_id 看近期战绩 目的：获取双方近几场（一般 5~10 场）的胜平负、进失球趋势。 调用：get_team_recent_performance_by_match_id(match_id, match_type=1)。 参考：收到的数据中分主客场，需要把队伍分别对应上。3.4用 get_head_to_head_history_by_match_id 查交锋 目的：查看双方历史交锋，默认根据比赛的的那一天查一年，在调用的时候把start date设为一年期，end date为比赛那天。 调用：get_head_to_head_history_by_match_id(match_id, start_date?, end_date?, match_type=1)。3.5调用 get_football_squad_by_match_id(match_id) 解析主客队“伤病/停赛/复出/存疑”。
 4 针对确定的match_id去执行以下步骤获取比赛赔率信息：4.1用 get_europe_odds_by_match_id 拉欧赔 目的：欧赔胜平负的初赔与即时赔，判断市场倾向。 调用：get_europe_odds_by_match_id(match_id, match_type=1)。4.2用 get_asian_handicap_odds_by_match_id 看亚盘 目的：查看让球盘口及变盘（升/降水、盘口深浅）。 调用：get_asian_handicap_odds_by_match_id(match_id, match_type=1)。4.3用 get_over_under_odds_by_match_id 看大小球 目的：获取大小球（Goal Line）初盘及变化。 调用：get_over_under_odds_by_match_id(match_id, match_type=1)。
-5 综合写作与输出 目的：整合前面各步结果，写出成品，并给出明确倾向，最终用markdown格式输出。 无工具调用：整理文字。写作要求：1 先用一段话概述本场比赛的背景和悬念。2 按“主队→客队”顺序，结合数据评估球队近况、战术特点、精神属性。3 重点说明伤停、轮换、战意和爆冷对结果的潜在影响。4 分析中引用关键数据作为论据，但不要堆砌。5 结尾给出：最可能赛果包括胜负和比分和1 2 句风险提示，体现客观性。6 全文 400 600 字左右即可，无需标题写成分段的连贯文章，段落按照赛事基本信息-主队信息-客队信息-交战信息-赔率信息-比赛预测分段即可，最后全文用markdown格式输出。
+5 综合写作与输出 目的：整合前面各步结果，写出成品，并给出明确倾向。 无工具调用：整理文字。写作要求：1 先用一段话概述本场比赛的背景和悬念。2 按“主队→客队”顺序，结合数据评估球队近况、战术特点、精神属性。3 重点说明伤停、轮换、战意和爆冷对结果的潜在影响。4 分析中引用关键数据作为论据，但不要堆砌。5 结尾给出：最可能赛果包括胜负和比分和1 2 句风险提示，体现客观性。6 全文 400 600 字左右即可，无需标题写成分段的连贯文章，段落按照赛事基本信息-主队信息-客队信息-交战信息-赔率信息-比赛预测分段即可。
 """
 
 BETTING_RECOMMENDATION_PROMPT = """
@@ -554,7 +554,7 @@ def parse_arguments() -> Dict[str, Any]:
                        help='API base URL')
     parser.add_argument('--tools_folders', nargs='+', default=[],
                        help='工具目录路径（多个路径用空格分隔）')
-    parser.add_argument('--max_tokens', type=int, default=4096,
+    parser.add_argument('--max_tokens', type=int, default=8192,
                        help='最大令牌数')
     parser.add_argument('--temperature', type=float, default=0.2,
                        help='温度参数')
