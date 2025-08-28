@@ -541,7 +541,7 @@ def run_web_demo(api_key: str, model_name: str = None, base_url: str = None,
 def parse_arguments() -> Dict[str, Any]:
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
-        description='Sage Multi-Agent Interactive Chat',
+        description='新质向阳多智能体平台',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例用法:
