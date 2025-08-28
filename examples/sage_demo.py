@@ -281,36 +281,38 @@ class StreamingHandler:
 
 def setup_ui():
     """设置用户界面"""
-    st.title("🧠 新质向阳多智能体自动架构平台")
+    st.title("Sage：Muti-Agent Framework")
     st.markdown("**智能多智能体协作平台**")
-    
+
     # 获取全局配置
     settings = get_settings()
     
     # 侧边栏设置
-    with st.sidebar:
-        st.header("⚙️ 设置")
+    # with st.sidebar:
+    #     st.header("⚙️ 设置")
         
-        # 多智能体选项
-        use_multi_agent = st.toggle('🤖 启用多智能体推理', 
-                                   value=True)
-        use_deepthink = st.toggle('🧠 启用深度思考', 
-                                 value=settings.agent.enable_deep_thinking)
+    #     # 多智能体选项
+    #     use_multi_agent = st.toggle('🤖 启用多智能体推理', 
+    #                                value=False)
+    #     use_deepthink = st.toggle('🧠 启用深度思考', 
+    #                              value=settings.agent.enable_deep_thinking)
         
-        # 系统信息
-        st.subheader("📊 系统信息")
-        st.info(f"**模型**: {settings.model.model_name}")
-        st.info(f"**温度**: {settings.model.temperature}")
-        st.info(f"**最大标记**: {settings.model.max_tokens}")
-        st.info(f"**环境**: {settings.environment}")
+    #     # 系统信息
+    #     st.subheader("📊 系统信息")
+    #     st.info(f"**模型**: {settings.model.model_name}")
+    #     st.info(f"**温度**: {settings.model.temperature}")
+    #     st.info(f"**最大标记**: {settings.model.max_tokens}")
+    #     st.info(f"**环境**: {settings.environment}")
         
-        # 工具列表
-        if st.session_state.get('tool_manager'):
-            display_tools(st.session_state.tool_manager)
+    #     # 工具列表
+    #     if st.session_state.get('tool_manager'):
+    #         display_tools(st.session_state.tool_manager)
         
-        # 清除历史按钮
-        if st.button("🗑️ 清除对话历史", type="secondary"):
-            clear_history()
+    #     # 清除历史按钮
+    #     if st.button("🗑️ 清除对话历史", type="secondary"):
+    #         clear_history()
+    use_multi_agent=False
+    use_deepthink = settings.agent.enable_deep_thinking
     
     return use_multi_agent, use_deepthink
 
@@ -495,15 +497,22 @@ def run_web_demo(api_key: str, model_name: str = None, base_url: str = None,
     # 显示历史对话
     display_conversation_history()
     
-    # 用户输入
+    # 在输入框上方添加下拉菜单
+    menu_option = st.selectbox("请选择功能", ("赛事预测", "投注推荐"), key="menu_option")
+    
+    # 处理用户输入
     user_input = st.chat_input("💬 请输入您的问题...")
     
     if user_input and user_input.strip():
+        # 根据选择的功能处理输入
+        selected_function = st.session_state.get('menu_option', '赛事预测')
+        enhanced_input = f"[{selected_function}] {user_input.strip()}"
         process_user_input(
-            user_input.strip(), 
+            enhanced_input, 
             st.session_state.tool_manager, 
             st.session_state.controller
         )
+
 
 
 def parse_arguments() -> Dict[str, Any]:
