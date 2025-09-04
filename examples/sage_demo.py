@@ -334,7 +334,7 @@ def setup_ui():
     #         clear_history()
     
     # 使用默认值
-    use_multi_agent = True
+    use_multi_agent = False
     use_deepthink = True
     
     return use_multi_agent, use_deepthink
