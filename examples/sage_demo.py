@@ -333,7 +333,11 @@ def setup_ui():
     #     if st.button("🗑️ 清除对话历史", type="secondary"):
     #         clear_history()
     
-    # return use_multi_agent, use_deepthink
+    # 使用默认值
+    use_multi_agent = True
+    use_deepthink = True
+    
+    return use_multi_agent, use_deepthink
 
 
 def display_tools(tool_manager: ToolManager):
