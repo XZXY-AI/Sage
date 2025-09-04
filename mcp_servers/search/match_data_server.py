@@ -601,7 +601,43 @@ async def get_europe_odds_by_match_id(
         import traceback
         print(f"--- DETAILED ERROR IN get_win_draw_lose_odds ---")
         traceback.print_exc()
-        return f"An unexpected error occurred in get_win_draw_lose_odds: [Type: {type(e).__name__}] - [Details: {repr(e)}]"
+        return f"An unexpected error occurred in get_europe_odds_by_match_id: [Type: {type(e).__name__}] - [Details: {repr(e)}]"
+
+
+@mcp.tool()
+async def get_history_match(
+        match_type: Optional[str] = None
+) -> Union[Dict[str, Any], str]:
+    """
+    获取竞彩过去一周的比赛。
+    Fetches competitive matches from the past week.
+
+    Args:
+        match_type (Optional[str]): 比赛类型, 1 代表竞彩足球, 2 代表竞彩篮球。
+
+    Returns:
+        Union[Dict[str, Any], str]: 成功时返回历史比赛数据，失败时返回错误信息字符串。
+    """
+    endpoint = "http://ai-match.fengkuangtiyu.cn/api/v5/matches/getHistoryMatch"
+
+    params = {}
+    if match_type:
+        params["match_type"] = match_type
+
+    print(f"Executing get_history_match with params: {params}")
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(endpoint, params=params)
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        return f"API request failed with status {e.response.status_code}: {e.response.text}"
+    except Exception as e:
+        import traceback
+        print(f"--- DETAILED ERROR IN get_history_match ---")
+        traceback.print_exc()
+        return f"An unexpected error occurred in get_history_match: [Type: {type(e).__name__}] - [Details: {repr(e)}]"
 
 
 @mcp.tool()
