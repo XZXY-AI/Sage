@@ -314,7 +314,7 @@ def setup_ui():
         
         # 多智能体选项
         use_multi_agent = st.toggle('🤖 启用多智能体推理', 
-                                   value=True)
+                                   value=False)
         use_deepthink = st.toggle('🧠 启用深度思考', 
                                  value=settings.agent.enable_deep_thinking)
         
