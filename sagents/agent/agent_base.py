@@ -153,17 +153,23 @@ class AgentBase(ABC):
             # 需要处理 serializable_messages 中，如果有tool call ，但是没有后续的tool call id,需要去掉这条消息
             serializable_messages = self._remove_tool_call_without_id(serializable_messages)
             
-            stream = self.model.chat.completions.create(
-                messages=serializable_messages,
-                stream=True,
-                stream_options={"include_usage": True},
-                extra_body={
-                    "chat_template_kwargs": {"enable_thinking": False},
-                    "enable_thinking":False,
-                    "thinking":{'type':"disabled"}
-                },
+            # 检查是否为Azure OpenAI，如果是则不发送不支持的参数
+            create_params = {
+                "messages": serializable_messages,
+                "stream": True,
+                "stream_options": {"include_usage": True},
                 **final_config
-            )
+            }
+            
+            # 只有非Azure OpenAI才支持这些参数
+            if hasattr(self.model, '_base_url') and 'azure' not in str(self.model._base_url).lower():
+                create_params["extra_body"] = {
+                    "chat_template_kwargs": {"enable_thinking": False},
+                    "enable_thinking": False,
+                    "thinking": {'type': "disabled"}
+                }
+            
+            stream = self.model.chat.completions.create(**create_params)
             # 直接yield chunks，不再收集用于日志记录
             for chunk in stream:
                 # print(chunk)
@@ -258,7 +264,7 @@ class AgentBase(ABC):
             # 补充当前工作空间中的文件情况，工作空间的路径是 session_context.agent_workspace,需要把这个文件夹下的文件或者文件夹，有可能多层路径，给展示出来，类似tree 结构，只展示文件的相对路径
             current_agent_workspace = session_context.agent_workspace
             if current_agent_workspace:
-                system_prefix += f"\n当前工作空间 {session_context.system_context['file_workspace']} 的文件情况：\n"
+                system_prefix += f"\n当前工作空间 {session_context.system_context['local_file_workspace']} 的文件情况：\n"
                 # 如果没有文件，就不展示了
                 if not os.listdir(current_agent_workspace):
                     system_prefix += "当前工作空间下没有文件。\n"

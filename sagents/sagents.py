@@ -272,20 +272,26 @@ class SAgent:
         except Exception as e:
             # 标记会话错误
             logger.error(f"traceback: {traceback.format_exc()}")
-            session_context.status = SessionStatus.ERROR
+            try:
+                session_context.status = SessionStatus.ERROR
+            except NameError:
+                # session_context 未定义，创建一个临时的错误响应
+                pass
             yield from self._handle_workflow_error(e)
         finally:
             # 保存会话状态到文件
             try:
-                session_context.save()
+                if 'session_context' in locals():
+                    session_context.save()
             except Exception as save_error:
                 logger.error(f"traceback: {traceback.format_exc()}")
                 logger.error(f"SAgent: 保存会话状态 {session_id} 时出错: {save_error}")
             
             # 清理会话，防止内存泄漏
             try:
-                delete_session_context(session_id)
-                logger.info(f"SAgent: 已清理会话 {session_id}")
+                if 'session_id' in locals():
+                    delete_session_context(session_id)
+                    logger.info(f"SAgent: 已清理会话 {session_id}")
             except Exception as cleanup_error:
                 logger.error(f"SAgent: 清理会话 {session_id} 时出错: {cleanup_error}")
 

@@ -1,13 +1,8 @@
 """
-“你是一名专业的足球比赛数据分析师。请对比赛ID为 3558764 的比赛进行一次全面的赛前分析。请遵循以下步骤：
-1. 获取比赛的基本信息、双方排名和积分。
-2. 获取双方的近期战绩和历史交锋记录。
-3. 获取比赛的阵容详情和欧盘、亚盘赔率。
-4. 最后，综合以上所有信息，给出一个包含基本面、战绩分析、赔率参考和最终结论的报告。”
 Sage Multi-Agent Demo
+
 智能多智能体协作演示应用
 主要优化：代码结构、错误处理、用户体验、性能
-
 """
 
 import os
@@ -40,20 +35,10 @@ print("sagents loaded from:", sagents.__file__)
 
 from sagents.sagents import SAgent
 from sagents.tool.tool_manager import ToolManager
-from sagents.utils import logger
-from sagents.config import get_settings, update_settings, Settings
-from sagents.utils import (
-    SageException, 
-    ToolExecutionError, 
-    AgentTimeoutError,
-    with_retry,
-    exponential_backoff,
-    handle_exception
-)
+from sagents.context.messages.message_manager import MessageManager
+from sagents.utils.logger import logger
+from openai import OpenAI
 
-# 预制提示词（不在页面显示，但在代码中使用）
-PREDEFINED_PROMPT = """
-"""
 
 
 class ComponentManager:
@@ -110,30 +95,25 @@ class ComponentManager:
                 logger.warning(f"工具目录不存在: {folder}")
         
         return tool_manager
-
-    @with_retry(exponential_backoff(max_attempts=3, base_delay=1.0, max_delay=5.0))
+    
     def _init_model(self) -> OpenAI:
         """初始化模型"""
-        logger.debug(f"初始化模型，base_url: {self.settings.model.base_url}")
+        logger.debug(f"初始化模型，base_url: {self.base_url}")
         try:
-            # vvv 新增的 Azure 处理逻辑 vvv
-            if "azure.com" in self.settings.model.base_url:
-                logger.info("检测到 Azure 配置，使用 AzureOpenAI 客户端")
+            if "azure" in self.base_url.lower():
                 return AzureOpenAI(
-                    api_key=self.settings.model.api_key,
-                    azure_endpoint=self.settings.model.base_url,
-                    api_version="2025-01-01-preview"  # 建议使用一个稳定且常用的 api-version
+                    api_key=self.api_key,
+                    azure_endpoint=self.base_url,
+                    api_version="2025-01-01-preview"
                 )
-            # ^^^ 新增的 Azure 处理逻辑 ^^^
-
-            # 保留原来的逻辑作为默认选项
-            return OpenAI(
-                api_key=self.api_key,
-                base_url=self.base_url
-            )
+            else:
+                return OpenAI(
+                    api_key=self.api_key,
+                    base_url=self.base_url
+                )
         except Exception as e:
             logger.error(f"模型初始化失败: {str(e)}")
-            raise SageException(f"无法连接到 API: {str(e)}")
+            raise 
     
     def _init_controller(self) -> SAgent:
         """初始化控制器"""
@@ -143,21 +123,8 @@ class ComponentManager:
                 "temperature": self.temperature,
                 "max_tokens": self.max_tokens
             }
-
-            workspace_path = os.path.join(project_root, "workspace")
-            os.makedirs(workspace_path, exist_ok=True)  # 这行能确保文件夹存在
-
-            # 使用这个新路径来初始化控制器
-            controller = AgentController(self._model, model_config, workspace=workspace_path)
             
-            # 注册代码智能体
-            try:
-                code_agent = CodeAgent(self._model, model_config)
-                self._tool_manager.register_tool(code_agent.to_tool())
-                logger.debug("代码智能体注册成功")
-            except Exception as e:
-                logger.warning(f"代码智能体注册失败: {str(e)}")
-                # 不中断整个初始化过程，代码智能体是可选的
+            controller = SAgent(self._model, model_config,workspace="workspace")
             
             return controller
             
@@ -316,7 +283,6 @@ def clear_history():
     logger.info("用户清除对话历史")
     st.session_state.conversation = []
     st.session_state.inference_conversation = []
-    st.session_state.is_first_input = True  # 重置首次输入标志
     st.rerun()
 
 
@@ -328,8 +294,6 @@ def init_session_state():
         st.session_state.inference_conversation = []
     if 'components_initialized' not in st.session_state:
         st.session_state.components_initialized = False
-    if 'is_first_input' not in st.session_state:
-        st.session_state.is_first_input = True
 
 
 def display_conversation_history():
@@ -347,23 +311,14 @@ def process_user_input(user_input: str, tool_manager: ToolManager, controller: S
     """处理用户输入"""
     logger.info(f"处理用户输入: {user_input[:50]}{'...' if len(user_input) > 50 else ''}")
     
-    # 如果是首次输入，拼接预制提示词
-    if st.session_state.is_first_input:
-        actual_input = PREDEFINED_PROMPT + user_input
-        st.session_state.is_first_input = False
-    else:
-        actual_input = user_input
+    # 创建用户消息
+    user_msg = create_user_message(user_input)
     
-    # 创建用户消息（使用拼接后的内容）
-    user_msg = create_user_message(actual_input)
-    # 创建显示用的用户消息（只显示原始输入）
-    display_user_msg = create_user_message(user_input)
-    
-    # 添加到对话历史（推理用拼接后的，显示用原始的）
-    st.session_state.conversation.append(display_user_msg)
+    # 添加到对话历史
+    st.session_state.conversation.append(user_msg)
     st.session_state.inference_conversation.append(user_msg)
     
-    # 显示用户消息（只显示原始输入）
+    # 显示用户消息
     with st.chat_message("user"):
         st.write(user_input)
     
@@ -487,10 +442,10 @@ def parse_arguments() -> Dict[str, Any]:
     parser.add_argument('--api_key', required=True, 
                        help='OpenRouter API key（必需）')
     parser.add_argument('--model', 
-                       default='mistralai/mistral-small-3.1-24b-instruct:free',
-                       help='模型名称')
+                       default='gpt-4o',
+                       help='模型名称（Azure OpenAI使用部署名称）')
     parser.add_argument('--base_url', 
-                       default='https://openrouter.ai/api/v1',
+                       default='https://api.openai.com/v1',
                        help='API base URL')
     parser.add_argument('--tools_folders', nargs='+', default=[],
                        help='工具目录路径（多个路径用空格分隔）')
