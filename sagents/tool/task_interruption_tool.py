@@ -1,7 +1,7 @@
 """
 任务完成工具
 """
-from typing import Dict, Any
+from typing import Dict, Any, List
 from .tool_base import ToolBase, ToolSpec
 
 class TaskInterruptionTool(ToolBase):
@@ -11,7 +11,7 @@ class TaskInterruptionTool(ToolBase):
         super().__init__()
     
     @ToolBase.tool()
-    def ask_followup_question(self, question: str,follow_up:list['str']=None) -> Dict[str, Any]:
+    def ask_followup_question(self, question: str, follow_up: List[str] = None) -> Dict[str, Any]:
         """
         The ask_followup_question tool enables interactive communication by asking specific questions to gather additional information needed to complete tasks effectively.
         
