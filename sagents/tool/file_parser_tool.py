@@ -17,7 +17,7 @@ import tarfile
 import re
 import chardet
 import traceback
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional, Union,Tuple
 import pdfplumber
 import pypandoc
 from pptx import Presentation
@@ -333,8 +333,35 @@ class OfficeParser:
                 shapes = sorted(slide.shapes, key=lambda x: (x.top, x.left))
                 
                 for shape in shapes:
-                    if hasattr(shape, "text") and shape.text.strip():
-                        slide_content.append(shape.text.strip())
+                    if hasattr(shape, "text_frame") and shape.text_frame:
+                        text_frame = shape.text_frame
+                        full_text = []
+                        for paragraph in text_frame.paragraphs:
+                            para_text = "".join([run.text for run in paragraph.runs])
+                            if para_text.strip():
+                                full_text.append(para_text.strip())
+                        if full_text:
+                            slide_content.append('\n'.join(full_text))
+                        else:
+                            logger.debug(f"Shape {shape.name} has text_frame but no text extracted from paragraphs.")
+                    elif hasattr(shape, "image"):
+                        logger.debug(f"Shape {shape.name} is an image.")
+                    elif shape.has_table:
+                        table = shape.table
+                        table_text = []
+                        for row in table.rows:
+                            row_text = []
+                            for cell in row.cells:
+                                if cell.text.strip():
+                                    row_text.append(cell.text.strip())
+                            if row_text:
+                                table_text.append(' | '.join(row_text))
+                        if table_text:
+                            slide_content.append('\n'.join(table_text))
+                        else:
+                            logger.debug(f"Shape {shape.name} is a table but no text extracted.")
+                    else:
+                        logger.debug(f"Shape {shape.name} is of type {shape.shape_type} and has no text attribute.")
                 
                 slides_text.append('\n'.join(slide_content))
             
@@ -347,59 +374,81 @@ class ExcelParser:
     """Excel解析器"""
     
     @staticmethod
-    def extract_text_from_xlsx(file_path: str) -> str:
+    def extract_text_from_xlsx(file_path: str) -> Tuple[str, Dict[str, Any]]:
         """从Excel提取文本并转换为Markdown"""
         try:
             excel_data = ExcelParser._read_excel_to_dict(file_path)
             markdown_tables = []
-            
+            metadata = {}
+            metadata['sheets'] = []
             for sheet_name, sheet_data in excel_data.items():
                 # 限制行数
-                if len(sheet_data) > 100:
-                    sheet_data = sheet_data[:100]
+                # if len(sheet_data) > 100:
+                #     sheet_data = sheet_data[:100]
                     
                 sheet_md = ExcelParser._sheet_data_to_markdown(sheet_data, sheet_name)
                 markdown_tables.append(sheet_md)
-            
-            return '\n\n'.join(markdown_tables)
+                metadata['sheets'].append(sheet_name)
+                metadata['sheet_' + sheet_name] = {
+                    'rows': len(sheet_data),
+                    'columns': len(sheet_data[0]) if sheet_data else 0
+                }
+            return '\n\n'.join(markdown_tables), metadata
             
         except Exception as e:
             raise FileParserError(f"Excel解析失败: {str(e)}")
         
     @staticmethod
     def _read_excel_to_dict(file_path: str) -> Dict[str, List[List[str]]]:
-        """读取Excel文件到字典"""
-        workbook = load_workbook(file_path, data_only=True, read_only=True)
+        """读取Excel文件到字典，正确处理合并单元格"""
+        # 需要关闭read_only模式才能访问合并单元格信息
+        workbook = load_workbook(file_path, data_only=True, read_only=False)
         excel_data = {}
 
         for sheet_name in workbook.sheetnames:
             sheet = workbook[sheet_name]
-            sheet_data = []
-
-            # 读取数据
-            for row in sheet.iter_rows(values_only=True):
-                if row is None:
-                    continue
-                row_data = [
-                    str(cell).replace('\n', '\\n') if cell is not None else ''
-                    for cell in row
-                ]
-                sheet_data.append(row_data)
-                
-            if not sheet_data:
-                continue
-                
-            # 统一行长度
-            max_length = max(len(row) for row in sheet_data) if sheet_data else 0
-            for i, row in enumerate(sheet_data):
-                if len(row) < max_length:
-                    sheet_data[i] = row + [''] * (max_length - len(row))
             
-            # 清理空行和空列
-            sheet_data = ExcelParser._clean_empty_rows_cols(sheet_data)
+            # 创建合并单元格值映射
+            merged_cell_values = {}
+            for merged_range in sheet.merged_cells.ranges:
+                # 获取合并单元格左上角的值
+                top_left_cell = sheet.cell(merged_range.min_row, merged_range.min_col)
+                value = top_left_cell.value
+                
+                # 为合并范围内的所有单元格设置相同的值
+                for row in range(merged_range.min_row, merged_range.max_row + 1):
+                    for col in range(merged_range.min_col, merged_range.max_col + 1):
+                        merged_cell_values[(row, col)] = value
+            
+            # 读取数据，考虑合并单元格
+            sheet_data = []
+            max_row = sheet.max_row
+            max_col = sheet.max_column
+            
+            if max_row and max_col:
+                for row_idx in range(1, max_row + 1):
+                    row_data = []
+                    for col_idx in range(1, max_col + 1):
+                        # 检查是否是合并单元格
+                        if (row_idx, col_idx) in merged_cell_values:
+                            cell_value = merged_cell_values[(row_idx, col_idx)]
+                        else:
+                            cell = sheet.cell(row_idx, col_idx)
+                            cell_value = cell.value
+                        
+                        cell_str = str(cell_value).replace('\n', '\\n') if cell_value is not None else ''
+                        row_data.append(cell_str)
+                    
+                    sheet_data.append(row_data)
+                
+                if not sheet_data:
+                    continue
+                
+                # 清理空行和空列
+                sheet_data = ExcelParser._clean_empty_rows_cols(sheet_data)
 
-            if sheet_data:
-                excel_data[sheet_name] = sheet_data
+                if sheet_data:
+                    excel_data[sheet_name] = sheet_data
         
         workbook.close()
         return excel_data
@@ -821,25 +870,28 @@ class FileParserTool(ToolBase):
         logger.debug("Initializing FileParserTool")
         super().__init__()
 
+
     @ToolBase.tool()
-    def extract_text_from_file(
+    def extract_text_from_non_text_file(
         self, 
         input_file_path: str, 
         start_index: int = 0, 
         max_length: int = 5000,
-        include_metadata: bool = False
+        include_metadata: bool = True
     ) -> Dict[str, Any]:
-        """从本地的各种格式的文件中提取方便阅读的markdown文本内容
+        """读取本地存储下的非文本文件，例如pdf，docx，doc，ppt，pptx，xlsx，xls等文件，返回Markdown的文本数据
 
         Args:
             input_file_path (str): 输入文件路径，本地的绝对路径
             start_index (int): 开始提取的字符位置，默认0
-            max_length (int): 最大提取长度，默认5000字符
-            include_metadata (bool): 是否包含文件元数据，默认False
+            max_length (int): 单次最大提取长度，默认5000字符，最大5000字符
+            include_metadata (bool): 是否包含文件元数据，默认True
 
         Returns:
             Dict[str, Any]: 包含提取文本和相关信息的字典
         """
+        if max_length > 5000:
+            max_length = 5000
         start_time = time.time()
         operation_id = hashlib.md5(f"extract_{input_file_path}_{time.time()}".encode()).hexdigest()[:8]
         logger.info(f"📄 extract_text_from_file开始执行 [{operation_id}] - 文件: {input_file_path}")
@@ -891,13 +943,46 @@ class FileParserTool(ToolBase):
                     if file_extension == '.pptx':
                         extracted_text = OfficeParser.extract_text_from_pptx(input_file_path)
                     else:
-                        # PPT需要额外的处理，这里简化处理
-                        extracted_text = "PPT文件暂不支持，请转换为PPTX格式"
+                        # PPT需要额外的处理，尝试使用LibreOffice转换为PPTX
+                        pptx_output_path = input_file_path + 'x'
+                        try:
+                            # 检查libreoffice是否安装
+                            subprocess.run(['libreoffice', '--version'], check=True, capture_output=True)
+                            logger.info(f"尝试使用LibreOffice将PPT转换为PPTX: {input_file_path} -> {pptx_output_path}")
+                            command = [
+                                'libreoffice',
+                                '--headless',
+                                '--convert-to', 'pptx',
+                                '--outdir', os.path.dirname(input_file_path),
+                                input_file_path
+                            ]
+                            result = subprocess.run(command, capture_output=True, text=True, check=True)
+                            logger.info(f"LibreOffice转换输出: {result.stdout}")
+                            logger.error(f"LibreOffice转换错误输出: {result.stderr}")
+
+                            if os.path.exists(pptx_output_path):
+                                extracted_text = OfficeParser.extract_text_from_pptx(pptx_output_path)
+                                logger.info(f"PPT成功转换为PPTX并提取内容: {pptx_output_path}")
+                                # 转换成功后删除临时生成的pptx文件
+                                os.remove(pptx_output_path)
+                            else:
+                                extracted_text = "PPT文件转换失败，无法生成PPTX文件。请手动转换为PPTX格式。"
+                                logger.error(f"PPT文件转换失败，未找到生成的PPTX文件: {pptx_output_path}")
+                        except FileNotFoundError:
+                            extracted_text = "LibreOffice未安装或不在PATH中，无法自动转换PPT文件。请安装LibreOffice或手动转换为PPTX格式。"
+                            logger.error("LibreOffice未安装或不在PATH中，无法自动转换PPT文件。")
+                        except subprocess.CalledProcessError as e:
+                            extracted_text = f"LibreOffice转换PPT文件时出错: {e.stderr}"
+                            logger.error(f"LibreOffice转换PPT文件时出错: {e.stderr}")
+                        except Exception as e:
+                            extracted_text = f"处理PPT文件时发生未知错误: {e}"
+                            logger.error(f"处理PPT文件时发生未知错误: {e}")
                         
                 elif file_extension in ['.xlsx', '.xls']:
                     logger.debug(f"📈 使用Excel解析器")
-                    extracted_text = ExcelParser.extract_text_from_xlsx(input_file_path)
-                    
+                    extracted_text, excel_metadata = ExcelParser.extract_text_from_xlsx(input_file_path)
+                    if include_metadata:
+                        metadata.update(excel_metadata)
                 elif file_extension in ['.html', '.htm']:
                     logger.debug(f"🌐 使用HTML解析器")
                     extracted_text = WebParser.extract_text_from_html(input_file_path)
@@ -947,29 +1032,24 @@ class FileParserTool(ToolBase):
             # 构建结果
             result = {
                 "success": True,
-                "text": truncated_text,
-                "file_info": {
-                    "file_path": input_file_path,
-                    "file_extension": file_extension,
-                    "file_size_mb": round(file_size_mb, 2),
-                    "mime_type": validation_result["mime_type"]
-                },
-                "text_info": {
-                    "original_length": len(extracted_text),
-                    "cleaned_length": len(cleaned_text),
-                    "extracted_length": len(truncated_text),
-                    "start_index": start_index,
-                    "max_length": max_length,
-                    **text_stats
-                },
-                "execution_time": total_time,
-                "operation_id": operation_id
+                "文件的文本信息": {
+                    "文件全部的文本长度": len(cleaned_text),
+                    "本次读取的长度": len(truncated_text),
+                    "剩余未读取的长度": len(cleaned_text) - (start_index + len(truncated_text)),
+                    "本次读取文本的开始位置": start_index,
+                    "本次读取文本的结束位置": start_index + len(truncated_text),
+                }
             }
             
+            # 如果是全部文本，没有截断，key 使用text ，否则使用部分text
+            if start_index == 0 and max_length >= len(truncated_text):
+                result["本次读取的文本"] = truncated_text
+            else:
+                result["本次读取的部分文本"] = truncated_text
+
             if include_metadata and metadata:
-                result["metadata"] = metadata
+                result["文件的metadata"] = metadata
                 logger.debug(f"📋 包含元数据: {len(metadata)} 项")
-            
             return result
             
         except Exception as e:
@@ -1201,7 +1281,7 @@ class FileParserTool(ToolBase):
         
         for file_path in file_paths:
             try:
-                result = self.extract_text_from_file(
+                result = self.extract_text_from_non_text_file(
                     input_file_path=file_path,
                     start_index=0,
                     max_length=max_length,

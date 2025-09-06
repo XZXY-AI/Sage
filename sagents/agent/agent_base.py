@@ -1,23 +1,21 @@
-"""
-AgentBase 重构版本
-
-智能体基类，提供所有智能体的通用功能和接口。
-改进了代码结构、错误处理、日志记录和可维护性。
-
-作者: Eric ZZ
-版本: 2.0 (重构版)
-"""
-
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional, Generator
+from math import log
+from tracemalloc import stop
+from typing import List, Dict, Any, Optional, Generator, Union
 import re,json
 import uuid
 import time
+from httpx import request
 from sagents.utils.logger import logger
+from sagents.utils.stream_format import merge_stream_response_to_non_stream_response
 from sagents.tool.tool_base import AgentToolSpec
-from sagents.utils.llm_request_logger import get_llm_logger
-import traceback
-
+from sagents.tool.tool_manager import ToolManager
+from sagents.context.session_context import get_session_context, SessionContext
+from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
+import traceback,os
+from openai import OpenAI
+from openai.types.chat import ChatCompletionChunk
+from openai.types.chat.chat_completion_chunk import Choice,ChoiceDelta
 
 class AgentBase(ABC):
     """
@@ -27,7 +25,7 @@ class AgentBase(ABC):
     流式处理和内容解析等核心功能。
     """
 
-    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
+    def __init__(self, model: Optional[OpenAI] = None, model_config: Dict[str, Any] = {}, system_prefix: str = ""):
         """
         初始化智能体基类
         
@@ -39,619 +37,12 @@ class AgentBase(ABC):
         self.model = model
         self.model_config = model_config
         self.system_prefix = system_prefix
+        self.max_history_context_length = 20000
         self.agent_description = f"{self.__class__.__name__} agent"
-        
-        # Token使用统计
-        self.token_stats = {
-            'total_calls': 0,
-            'total_input_tokens': 0,
-            'total_output_tokens': 0,
-            'total_cached_tokens': 0,
-            'total_reasoning_tokens': 0,
-            'step_details': []  # 详细的每步记录
-        }
+        self.agent_name = self.__class__.__name__
         
         logger.debug(f"AgentBase: 初始化 {self.__class__.__name__}，模型配置: {model_config}")
     
-    def _track_token_usage(self, response, step_name: str, start_time: float = None):
-        """
-        跟踪模型调用的token使用情况
-        
-        Args:
-            response: 模型响应对象
-            step_name: 步骤名称（如"task_analysis", "planning", "execution"等）
-            start_time: 开始时间戳
-        """
-        if hasattr(response, 'usage') and response.usage:
-            usage = response.usage
-            
-            # 提取token信息
-            input_tokens = getattr(usage, 'prompt_tokens', 0)
-            output_tokens = getattr(usage, 'completion_tokens', 0)
-            total_tokens = getattr(usage, 'total_tokens', input_tokens + output_tokens)
-            
-            # 处理不同模型的特殊字段 - 修复对象访问方式
-            cached_tokens = 0
-            reasoning_tokens = 0
-            
-            # 处理prompt_tokens_details
-            if hasattr(usage, 'prompt_tokens_details') and usage.prompt_tokens_details:
-                if hasattr(usage.prompt_tokens_details, 'cached_tokens'):
-                    cached_tokens = getattr(usage.prompt_tokens_details, 'cached_tokens', 0) or 0
-            else:
-                # 兼容性处理，某些模型可能直接在usage对象上有cached_tokens
-                cached_tokens = getattr(usage, 'cached_tokens', 0) or 0
-            
-            # 处理completion_tokens_details  
-            if hasattr(usage, 'completion_tokens_details') and usage.completion_tokens_details:
-                if hasattr(usage.completion_tokens_details, 'reasoning_tokens'):
-                    reasoning_tokens = getattr(usage.completion_tokens_details, 'reasoning_tokens', 0) or 0
-            else:
-                # 兼容性处理，某些模型可能直接在usage对象上有reasoning_tokens
-                reasoning_tokens = getattr(usage, 'reasoning_tokens', 0) or 0
-            
-            # 更新统计
-            self.token_stats['total_calls'] += 1
-            self.token_stats['total_input_tokens'] += input_tokens
-            self.token_stats['total_output_tokens'] += output_tokens
-            self.token_stats['total_cached_tokens'] += cached_tokens
-            self.token_stats['total_reasoning_tokens'] += reasoning_tokens
-            
-            # 记录详细步骤
-            execution_time = time.time() - start_time if start_time else 0
-            step_detail = {
-                'step': step_name,
-                'agent': self.__class__.__name__,
-                'input_tokens': input_tokens,
-                'output_tokens': output_tokens,
-                'cached_tokens': cached_tokens,
-                'reasoning_tokens': reasoning_tokens,
-                'total_tokens': total_tokens,
-                'execution_time': round(execution_time, 2),
-                'timestamp': time.time()
-            }
-            self.token_stats['step_details'].append(step_detail)
-            
-            # 简化日志输出，只显示关键信息
-            logger.debug(f"{self.__class__.__name__}: {step_name} - tokens: {total_tokens}, 耗时: {execution_time:.2f}s")
-    
-    def _track_streaming_token_usage(self, chunks, step_name: str, start_time: float = None):
-        """
-        跟踪流式响应的token使用情况
-        
-        Args:
-            chunks: 流式响应的所有chunks
-            step_name: 步骤名称
-            start_time: 开始时间戳
-        """
-        # 对于流式响应，只使用最后一个包含usage信息的chunk，避免重复统计
-        final_usage_chunk = None
-        for chunk in reversed(chunks):  # 从后往前找，使用最后的usage信息
-            if hasattr(chunk, 'usage') and chunk.usage:
-                final_usage_chunk = chunk
-                break
-        
-        if final_usage_chunk:
-            self._track_token_usage(final_usage_chunk, step_name, start_time)
-        else:
-            # 如果没有usage信息，记录一个空调用但计算execution_time
-            self.token_stats['total_calls'] += 1
-            execution_time = time.time() - start_time if start_time else 0
-            step_detail = {
-                'step': step_name,
-                'agent': self.__class__.__name__,
-                'input_tokens': 0,
-                'output_tokens': 0,
-                'cached_tokens': 0,
-                'reasoning_tokens': 0,
-                'total_tokens': 0,
-                'execution_time': round(execution_time, 2),
-                'timestamp': time.time(),
-                'note': f'No usage info in {len(chunks)} chunks'
-            }
-            self.token_stats['step_details'].append(step_detail)
-            logger.debug(f"{self.__class__.__name__}: {step_name} - 无usage信息，耗时: {execution_time:.2f}s")
-    
-    def get_token_stats(self) -> Dict[str, Any]:
-        """
-        获取当前agent的token使用统计
-        
-        Returns:
-            Dict[str, Any]: Token使用统计信息
-        """
-        return {
-            'agent_name': self.__class__.__name__,
-            **self.token_stats
-        }
-    
-    def reset_token_stats(self):
-        """重置token统计"""
-        self.token_stats = {
-            'total_calls': 0,
-            'total_input_tokens': 0,
-            'total_output_tokens': 0,
-            'total_cached_tokens': 0,
-            'total_reasoning_tokens': 0,
-            'step_details': []
-        }
-        logger.debug(f"{self.__class__.__name__}: Token统计已重置")
-    
-    def print_token_stats(self):
-        """打印当前agent的token使用统计（简化版本）"""
-        stats = self.get_token_stats()
-        logger.info(f"{stats['agent_name']} Token统计: 调用{stats['total_calls']}次, 总计{stats['total_input_tokens'] + stats['total_output_tokens']}tokens")
-
-    def _call_llm_streaming(self, messages: List[Dict[str, Any]], session_id: Optional[str] = None, step_name: str = "llm_call", model_config_override: Optional[Dict[str, Any]] = None):
-        """
-        通用的流式模型调用方法
-        
-        Args:
-            messages: 输入消息列表
-            session_id: 会话ID（用于请求记录）
-            step_name: 步骤名称（用于请求记录）
-            model_config_override: 覆盖模型配置（用于工具调用等）
-            
-        Returns:
-            Generator: 语言模型的流式响应
-        """
-        logger.debug(f"{self.__class__.__name__}: 调用语言模型进行流式生成")
-        
-        # 确定最终的模型配置
-        final_config = {**self.model_config}
-        if model_config_override:
-            final_config.update(model_config_override)
-        
-        try:
-            # 在发起请求前记录
-            if session_id:
-                try:
-                    llm_logger = get_llm_logger(session_id)
-                    # 将messages转换为prompt字符串
-                    prompt_text = self.convert_messages_to_str(messages)
-                    llm_logger.log_request(
-                        agent_name=self.__class__.__name__,
-                        prompt=prompt_text,
-                        response="",  # 流式调用时response为空，后续会更新
-                        model=final_config.get("model", "gpt-4"),
-                        additional_info={
-                            "step_name": step_name,
-                            "model_config": final_config
-                        }
-                    )
-                except Exception as log_error:
-                    logger.error(f"{self.__class__.__name__}: 记录LLM请求日志失败: {log_error}")
-            
-            # 发起LLM请求
-            stream = self.model.chat.completions.create(
-            messages=messages,
-            stream=True,
-            stream_options={"include_usage": True},
-                **final_config
-        )
-            
-            # 直接yield chunks，不再收集用于日志记录
-            for chunk in stream:
-                yield chunk
-                
-        except Exception as e:
-            logger.error(f"{self.__class__.__name__}: LLM流式调用失败: {e}")
-            raise
-    
-    def _call_llm_non_streaming(self, messages: List[Dict[str, Any]], session_id: Optional[str] = None, step_name: str = "llm_call", model_config_override: Optional[Dict[str, Any]] = None):
-        """
-        通用的非流式模型调用方法
-        
-        Args:
-            messages: 输入消息列表
-            session_id: 会话ID（用于请求记录）
-            step_name: 步骤名称（用于请求记录）
-            model_config_override: 覆盖模型配置（用于工具调用等）
-            
-        Returns:
-            模型响应对象
-        """
-        logger.debug(f"{self.__class__.__name__}: 调用语言模型进行非流式生成")
-        
-        # 确定最终的模型配置
-        final_config = {**self.model_config}
-        if model_config_override:
-            final_config.update(model_config_override)
-        
-        try:
-            # 在发起请求前记录
-            if session_id:
-                try:
-                    llm_logger = get_llm_logger(session_id)
-                    # 将messages转换为prompt字符串
-                    prompt_text = self.convert_messages_to_str(messages)
-                    llm_logger.log_request(
-                        agent_name=self.__class__.__name__,
-                        prompt=prompt_text,
-                        response="",  # 非流式调用时response为空，后续会更新
-                        model=final_config.get("model", "gpt-4"),
-                        additional_info={
-                            "step_name": step_name,
-                            "model_config": final_config
-                        }
-                    )
-                except Exception as log_error:
-                    logger.error(f"{self.__class__.__name__}: 记录LLM请求日志失败: {log_error}")
-            
-            # 发起LLM请求
-            response = self.model.chat.completions.create(
-            messages=messages,
-            stream=False,
-                **final_config
-        )
-            return response
-        except Exception as e:
-            logger.error(f"{self.__class__.__name__}: LLM非流式调用失败: {e}")
-            raise
-    
-    def _create_message_chunk(self, 
-                            content: str, 
-                            message_id: str, 
-                            show_content: str,
-                            message_type: str = 'assistant',
-                            role: str = 'assistant') -> List[Dict[str, Any]]:
-        """
-        创建通用的消息块
-        
-        Args:
-            content: 消息内容
-            message_id: 消息ID
-            show_content: 显示内容
-            message_type: 消息类型
-            role: 消息角色
-            
-        Returns:
-            List[Dict[str, Any]]: 格式化的消息块列表
-        """
-        message_chunk = {
-            'role': role,
-            'content': content,
-            'type': message_type,
-            'message_id': message_id,
-            'show_content': show_content
-        }
-            
-        return [message_chunk]
-    
-    def _handle_error_generic(self, 
-                            error: Exception, 
-                            error_context: str,
-                            message_type: str = 'error') -> Generator[List[Dict[str, Any]], None, None]:
-        """
-        通用的错误处理方法
-        
-        Args:
-            error: 发生的异常
-            error_context: 错误上下文描述
-            message_type: 消息类型
-            
-        Yields:
-            List[Dict[str, Any]]: 错误消息块
-        """
-        logger.error(f"{self.__class__.__name__}: {error_context}错误: {str(error)}")
-        
-        error_message = f"\n{error_context}失败: {str(error)}"
-        message_id = str(uuid.uuid4())
-        
-        yield [{
-            'role': 'tool',
-            'content': error_message,
-            'type': message_type,
-            'message_id': message_id,
-            'show_content': error_message
-        }]
-    
-    def _execute_streaming_with_token_tracking(self, 
-                                             prompt: str, 
-                                             step_name: str,
-                                             system_message: Optional[Dict[str, Any]] = None,
-                                             message_type: str = 'assistant',
-                                             session_id: Optional[str] = None) -> Generator[List[Dict[str, Any]], None, None]:
-        """
-        执行流式处理并跟踪token使用
-        
-        Args:
-            prompt: 用户提示
-            step_name: 步骤名称（用于token统计）
-            system_message: 可选的系统消息
-            message_type: 消息类型
-            
-        Yields:
-            List[Dict[str, Any]]: 流式输出的消息块
-        """
-        logger.info(f"{self.__class__.__name__}: 开始执行流式{step_name}")
-        
-        message_id = str(uuid.uuid4())
-        
-        # 准备消息
-        if system_message:
-            messages = [system_message, {"role": "user", "content": prompt}]
-        else:
-            messages = [{"role": "user", "content": prompt}]
-        
-        # 执行流式处理
-        chunk_count = 0
-        start_time = time.time()
-        
-        # 收集所有chunks以便跟踪token使用
-        chunks = []
-        for chunk in self._call_llm_streaming(messages, session_id=session_id, step_name=step_name):
-            chunks.append(chunk)
-            if len(chunk.choices) ==0:
-                continue
-            if chunk.choices[0].delta.content:
-                delta_content = chunk.choices[0].delta.content
-                chunk_count += 1
-                
-                # 传递usage信息到消息块
-                yield self._create_message_chunk(
-                    content=delta_content,
-                    message_id=message_id,
-                    show_content=delta_content,
-                    message_type=message_type
-                )
-        
-        # 跟踪token使用情况
-        self._track_streaming_token_usage(chunks, step_name, start_time)
-        
-        logger.info(f"{self.__class__.__name__}: 流式{step_name}完成，共生成 {chunk_count} 个文本块")
-        
-        # 发送结束标记（也包含最终的usage信息）
-        yield self._create_message_chunk(
-            content="",
-            message_id=message_id,
-            show_content="\n",
-            message_type=message_type
-        )
-
-    def _execute_streaming_with_token_tracking_with_message_id(self, 
-                                             prompt: str, 
-                                             step_name: str,
-                                             system_message: Optional[Dict[str, Any]] = None,
-                                             message_type: str = 'assistant',
-                                             session_id: Optional[str] = None,
-                                             message_id: str = None) -> Generator[List[Dict[str, Any]], None, None]:
-        """
-        执行流式处理并跟踪token使用（支持传入message_id）
-        
-        Args:
-            prompt: 用户提示
-            step_name: 步骤名称（用于token统计）
-            system_message: 可选的系统消息
-            message_type: 消息类型
-            session_id: 会话ID
-            message_id: 指定的消息ID，如果为None则自动生成
-            
-        Yields:
-            List[Dict[str, Any]]: 流式输出的消息块
-        """
-        logger.info(f"{self.__class__.__name__}: 开始执行流式{step_name}")
-        
-        if message_id is None:
-            message_id = str(uuid.uuid4())
-        
-        # 准备消息
-        if system_message:
-            messages = [system_message, {"role": "user", "content": prompt}]
-        else:
-            messages = [{"role": "user", "content": prompt}]
-        
-        # 执行流式处理
-        chunk_count = 0
-        start_time = time.time()
-        
-        # 收集所有chunks以便跟踪token使用
-        chunks = []
-        for chunk in self._call_llm_streaming(messages, session_id=session_id, step_name=step_name):
-            chunks.append(chunk)
-            if len(chunk.choices) ==0:
-                continue
-            if chunk.choices[0].delta.content:
-                delta_content = chunk.choices[0].delta.content
-                chunk_count += 1
-                
-                # 传递usage信息到消息块
-                yield self._create_message_chunk(
-                    content=delta_content,
-                    message_id=message_id,
-                    show_content=delta_content,
-                    message_type=message_type
-                )
-        
-        # 跟踪token使用情况
-        self._track_streaming_token_usage(chunks, step_name, start_time)
-        
-        logger.info(f"{self.__class__.__name__}: 流式{step_name}完成，共生成 {chunk_count} 个文本块")
-        
-        # 发送结束标记（也包含最终的usage信息）
-        yield self._create_message_chunk(
-            content="",
-            message_id=message_id,
-            show_content="\n",
-            message_type=message_type
-        )
-    
-    def prepare_unified_system_message(self,
-                                     session_id: Optional[str] = None,
-                                     system_context: Optional[Dict[str, Any]] = None,
-                                     custom_prefix: Optional[str] = None) -> Dict[str, Any]:
-        """
-        统一的系统消息生成方法
-        
-        这个方法会自动使用每个agent定义的SYSTEM_PREFIX_DEFAULT常量，
-        如果agent没有定义该常量，则使用传入的custom_prefix或默认的system_prefix。
-        
-        Args:
-            session_id: 会话ID（向后兼容，现在可从system_context获取）
-            system_context: 运行时系统上下文字典，包含所有需要的信息
-            custom_prefix: 自定义前缀，如果agent没有SYSTEM_PREFIX_DEFAULT时使用
-            
-        Returns:
-            Dict[str, Any]: 统一格式的系统消息字典
-        """
-        logger.debug(f"{self.__class__.__name__}: 生成统一系统消息")
-        
-        # 1. 确定系统前缀
-        system_prefix = self._get_system_prefix(custom_prefix)
-        
-        # 2. 构建基础系统内容
-        system_content = system_prefix
-        
-        # 3. 添加运行时system_context信息
-        if system_context:
-            system_content += self._build_system_context_section(system_context)
-        
-        logger.debug(f"{self.__class__.__name__}: 系统消息生成完成，总长度: {len(system_content)}")
-        
-        return {
-            'role': 'system',
-            'content': system_content
-        }
-    
-    def _get_system_prefix(self, custom_prefix: Optional[str] = None) -> str:
-        """
-        获取系统前缀
-        
-        优先级：
-        1. agent的SYSTEM_PREFIX_DEFAULT常量
-        2. custom_prefix参数
-        3. agent的system_prefix实例变量
-        4. 默认描述
-        
-        Args:
-            custom_prefix: 自定义前缀
-            
-        Returns:
-            str: 最终的系统前缀
-        """
-        # 优先使用agent定义的SYSTEM_PREFIX_DEFAULT常量
-        if hasattr(self, 'SYSTEM_PREFIX_DEFAULT'):
-            return self.SYSTEM_PREFIX_DEFAULT
-        
-        # 其次使用传入的custom_prefix
-        if custom_prefix:
-            return custom_prefix
-        
-        # 再次使用实例的system_prefix
-        if self.system_prefix:
-            return self.system_prefix
-        
-        # 最后使用默认描述
-        return f"你是一个{self.__class__.__name__}智能体。"
-    
-    def _build_system_context_section(self, system_context: Dict[str, Any]) -> str:
-        """
-        构建运行时system_context信息部分
-        
-        Args:
-            system_context: 运行时系统上下文字典
-            
-        Returns:
-            str: 格式化的system_context字符串
-        """
-        logger.debug(f"{self.__class__.__name__}: 添加运行时system_context到系统消息")
-        section = "\n\n补充上下文信息：\n"
-        
-        for key, value in system_context.items():
-            if isinstance(value, dict):
-                # 如果值是字典，格式化显示
-                formatted_dict = json.dumps(value, ensure_ascii=False, indent=2)
-                section += f"{key}: {formatted_dict}\n"
-            elif isinstance(value, (list, tuple)):
-                # 如果值是列表或元组，格式化显示
-                formatted_list = json.dumps(list(value), ensure_ascii=False, indent=2)
-                section += f"{key}: {formatted_list}\n"
-            else:
-                # 其他类型直接转换为字符串
-                section += f"{key}: {str(value)}\n"
-        
-        return section
-
-    @abstractmethod
-    def run_stream(self, 
-                   messages: List[Dict[str, Any]], 
-                   tool_manager: Optional[Any] = None,
-                   session_id: str = None,
-                   system_context: Optional[Dict[str, Any]] = None) -> Generator[List[Dict[str, Any]], None, None]:
-        """
-        流式处理消息的抽象方法
-        
-        Args:
-            messages: 对话消息列表
-            tool_manager: 可选的工具管理器
-            session_id: 会话ID
-            system_context: 运行时系统上下文字典，包含基础信息和用户自定义信息
-            
-        Yields:
-            List[Dict[str, Any]]: 流式输出的消息块
-        """
-        pass
-
-    def run(self, 
-            messages: List[Dict[str, Any]], 
-            tool_manager: Optional[Any] = None,
-            session_id: str = None,
-            system_context: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-        """
-        执行Agent任务（非流式版本）
-        
-        默认实现：收集流式输出的所有块并合并为最终结果
-        
-        Args:
-            messages: 对话历史记录
-            tool_manager: 工具管理器
-            session_id: 会话ID
-            system_context: 运行时系统上下文字典，包含基础信息和用户自定义信息
-            
-        Returns:
-            List[Dict[str, Any]]: 任务执行结果消息列表
-        """
-        logger.debug(f"AgentBase: 开始执行非流式任务，Agent类型: {self.__class__.__name__}")
-        
-        # 收集所有流式输出的块
-        all_chunks = []
-        for chunk_batch in self.run_stream(
-            messages=messages,
-            tool_manager=tool_manager,
-            session_id=session_id,
-            system_context=system_context
-        ):
-            all_chunks.extend(chunk_batch)
-        
-        # 合并相同message_id的块
-        merged_messages = self._merge_chunks(all_chunks)
-        
-        # 记录Agent的完整输出
-        self._log_agent_output(merged_messages)
-        
-        logger.debug(f"AgentBase: 非流式任务完成，返回 {len(merged_messages)} 条合并消息")
-        return merged_messages
-
-    def _log_agent_output(self, final_messages: List[Dict[str, Any]]) -> None:
-        """
-        记录Agent的完整输出日志
-        
-        Args:
-            final_messages: Agent最终输出的完整消息列表
-        """
-        agent_name = self.__class__.__name__
-        
-        logger.info(f"🎯 {agent_name} 执行完成，输出 {len(final_messages)} 条消息")
-        
-        # 只记录基本统计信息，不打印详细内容
-        if final_messages:
-            message_types = {}
-            for msg in final_messages:
-                msg_type = msg.get('type', 'unknown')
-                message_types[msg_type] = message_types.get(msg_type, 0) + 1
-            
-            type_summary = ', '.join([f"{type_name}: {count}" for type_name, count in message_types.items()])
-            logger.debug(f"📊 {agent_name} 消息类型统计: {type_summary}")
-
     def to_tool(self) -> AgentToolSpec:
         """
         将智能体转换为工具格式
@@ -670,281 +61,227 @@ class AgentBase(ABC):
         )
         
         return tool_spec
-        
 
-    def _extract_json_from_markdown(self, content: str) -> str:
+    @abstractmethod
+    def run_stream(self, 
+                   session_context: SessionContext, 
+                   tool_manager: ToolManager = None,
+                   session_id: str = None,
+                   ) -> Generator[List[MessageChunk], None, None]:
         """
-        从markdown代码块中提取JSON内容
+        流式处理消息的抽象方法
         
         Args:
-            content: 可能包含markdown代码块的内容
+            session_context: 会话上下文
+            tool_manager: 可选的工具管理器
+            session_id: 会话ID
             
-        Returns:
-            str: 提取的JSON内容，如果没有找到代码块则返回原始内容
+        Yields:
+            List[MessageChunk]: 流式输出的消息块
         """
-        logger.debug("AgentBase: 尝试从内容中提取JSON")
-        
-        # 首先尝试直接解析
-        try:
-            json.loads(content)
-            return content
-        except json.JSONDecodeError:
-            pass
-        
-        # 尝试从markdown代码块中提取
-        code_block_pattern = r'```(?:json)?\n([\s\S]*?)\n```'
-        match = re.search(code_block_pattern, content)
-        
-        if match:
-            try:
-                json.loads(match.group(1))
-                logger.debug("AgentBase: 成功从markdown代码块中提取JSON")
-                return match.group(1)
-            except json.JSONDecodeError:
-                logger.warning(f"AgentBase: {self.__class__.__name__} 解析markdown代码块中的JSON失败")
-                pass
-        
-        logger.debug("AgentBase: 未找到有效JSON，返回原始内容")
-        return content
-
-    def _extract_completed_actions_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        从消息中提取已完成的操作，只保留上一次user 消息之后除task_decomposition之外的消息
-        
-        Args:
-            messages: 消息列表
-            
-        Returns:
-            List[Dict[str, Any]]: 已完成操作的消息列表
-        """
-        logger.info(f"AgentBase: {self.__class__.__name__} 从 {len(messages)} 条消息中提取已完成操作")
-        
-        # 添加调试信息：打印前几条消息的基本信息
-        for i, msg in enumerate(messages[:5]):
-            logger.info(f"AgentBase: 消息 {i}: role={msg.get('role')}, type={msg.get('type')}, content长度={len(msg.get('content', ''))}")
-        
-        completed_actions_messages = []
-        
-        # 从最后一条用户消息开始提取
-        for index, msg in enumerate(reversed(messages)):
-            if msg['role'] == 'user':
-                # 提取该用户消息之后的所有消息
-                completed_actions_messages.extend(messages[-index:])
-                break
-        logger.info(f'AgentBase: 在user消息之后提取了 {len(completed_actions_messages)} 条消息')
-        # 移除任务分解类型的消息，但保留其他重要类型的消息
-        filtered_messages = []
-        for msg in completed_actions_messages:
-            msg_type = msg.get('type', 'normal')
-            # 保留所有非task_decomposition类型的消息
-            if msg_type != 'task_decomposition':
-                filtered_messages.append(msg)
-            else:
-                logger.info(f"AgentBase: 过滤掉task_decomposition消息: {msg.get('content', '')[:50]}...")
-        
-
-        logger.info(f"AgentBase: {self.__class__.__name__} 提取了 {len(filtered_messages)} 条已完成操作消息")
-        
-        # 添加调试信息：打印提取的消息信息
-        for i, msg in enumerate(filtered_messages[:3]):
-            logger.info(f"AgentBase: 提取的消息 {i}: role={msg.get('role')}, type={msg.get('type')}, content长度={len(msg.get('content', ''))}")
-        
-        return filtered_messages
-
-    def _extract_task_description_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        从消息中提取任务描述
-        
-        Args:
-            messages: 消息列表
-            
-        Returns:
-            List[Dict[str, Any]]: 任务描述相关的消息列表
-        """
-        logger.debug(f"AgentBase: {self.__class__.__name__} 从 {len(messages)} 条消息中提取任务描述")
-        
-        task_description_messages = []
-        
-        # 提取到最后一条用户消息为止
-        for index, msg in enumerate(reversed(messages)):
-            if msg['role'] == 'user':
-                task_description_messages.extend(messages[:len(messages) - index])
-                break
-        
-        # 只保留正常类型和最终答案类型的消息
-        task_description_messages = [
-            msg for msg in task_description_messages 
-            if msg.get('type') in ['normal', 'final_answer']
-        ]
-
-        logger.debug(f"AgentBase: {self.__class__.__name__} 提取了 {len(task_description_messages)} 条任务描述消息")
-        return task_description_messages
-
-    def clean_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        清理消息，只保留OpenAI需要的字段
-        
-        Args:
-            messages: 原始消息列表
-            
-        Returns:
-            List[Dict[str, Any]]: 清理后的消息列表
-        """
-        logger.debug(f"AgentBase: 清理 {len(messages)} 条消息")
-        
-        clean_messages = []
-        
-        for msg in messages:
-                if 'tool_calls' in msg and msg['tool_calls'] is not None:
-                    clean_messages.append({
-                        'role': msg['role'],
-                        'tool_calls': msg['tool_calls']
-                    })
-                elif 'content' in msg:
-                    if 'tool_call_id' in msg:
-                        clean_messages.append({
-                            'role': msg['role'],
-                            'content': msg['content'],
-                            'tool_call_id': msg['tool_call_id']
-                        })
-                    else:
-                        clean_messages.append({
-                            'role': msg['role'],
-                            'content': msg['content']
-                        })
-        
-        logger.debug(f"AgentBase: 清理后保留 {len(clean_messages)} 条消息")
-        return clean_messages
-
-    def _merge_messages(self, 
-                       all_messages: List[Dict[str, Any]], 
-                       new_messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        通过message_id将新消息合并到现有消息中
-        
-        Args:
-            all_messages: 当前完整的消息列表
-            new_messages: 要合并的新消息
-            
-        Returns:
-            List[Dict[str, Any]]: 合并后的消息列表
-        """
-        merged = []
-        message_map = {}
-        
-        # 首先添加所有现有消息
-        for msg in all_messages:
-            msg_copy = msg.copy()
-            # 确保消息有message_id
-            if 'message_id' not in msg_copy:
-                msg_copy['message_id'] = str(uuid.uuid4())
-                logger.warning(f"AgentBase: 为现有消息自动生成message_id: {msg_copy['message_id'][:8]}...")
-            merged.append(msg_copy)
-            message_map[msg_copy['message_id']] = msg_copy
-        
-        # 然后合并新消息
-        for msg in new_messages:
-            msg_copy = msg.copy()
-            # 确保消息有message_id
-            if 'message_id' not in msg_copy:
-                msg_copy['message_id'] = str(uuid.uuid4())
-                logger.warning(f"AgentBase: 为新消息自动生成message_id: {msg_copy['message_id'][:8]}...")
-                
-            msg_id = msg_copy['message_id']
-            
-            if msg_id in message_map:
-                # 更新现有消息内容
-                existing = message_map[msg_id]
-                if 'content' in existing:
-                    existing['content'] += msg_copy.get('content', '')
-                if 'show_content' in existing:                
-                    existing['show_content'] += msg_copy.get('show_content', '')
-            else:
-                # 添加新消息
-                merged.append(msg_copy)
-                message_map[msg_id] = msg_copy
-        
-        return merged
-
-    def _merge_chunks(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        合并消息块，将具有相同message_id的块合并
-        
-        Args:
-            chunks: 消息块列表
-            
-        Returns:
-            List[Dict[str, Any]]: 合并后的消息列表
-        """
-        if not chunks:
-            return []
-        
-        merged_map = {}
-        result = []
-        
-        for chunk in chunks:
-            message_id = chunk.get('message_id')
-            if not message_id:
-                result.append(chunk)
-                continue
-                
-            if message_id in merged_map:
-                # 合并内容
-                existing = merged_map[message_id]
-                if 'content' in chunk:
-                    existing['content'] = existing.get('content', '') + chunk['content']
-                if 'show_content' in chunk:
-                    existing['show_content'] = existing.get('show_content', '') + chunk['show_content']
-            else:
-                merged_map[message_id] = chunk.copy()
-                result.append(merged_map[message_id])
-        
-        return result
-
-    def convert_messages_to_str(self, messages: List[Dict[str, Any]]) -> str:
-        """
-        将消息列表转换为字符串格式
-        
-        Args:
-            messages: 消息列表
-            
-        Returns:
-            str: 格式化后的消息字符串
-        """
-        logger.info(f"AgentBase: 将 {len(messages)} 条消息转换为字符串")
-        
-        messages_str_list = []
-        
-        for msg in messages:
-            if msg['role'] == 'user':
-                messages_str_list.append(f"User: {msg['content']}")
-            elif msg['role'] == 'assistant':
-                if 'content' in msg:
-                    messages_str_list.append(f"Assistant: {msg['content']}")
-                elif 'tool_calls' in msg:
-                    messages_str_list.append(f"Assistant: Tool calls: {msg['tool_calls']}")
-            elif msg['role'] == 'tool':
-                messages_str_list.append(f"Tool: {msg['content']}")
-        
-        result = "\n".join(messages_str_list) or "None"
-        logger.info(f"AgentBase: 转换后字符串长度: {len(result)}")
-        return result
+        pass
     
+    def _remove_tool_call_without_id(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        移除assistant 是tool call 但是在messages中其他的role 为tool 的消息中没有对应的tool call id
+        
+        Args:
+            messages: 输入消息列表
+            
+        Returns:
+            List[Dict[str, Any]]: 移除了没有对应 tool_call_id 的tool call 消息
+        """
+        new_messages = []
+        all_tool_call_ids_from_tool = []
+        for msg in messages:
+            if msg.get('role') == MessageRole.TOOL.value and 'tool_call_id' in msg:
+                all_tool_call_ids_from_tool.append(msg['tool_call_id'])
+        for msg in messages:
+            if msg.get('role') == MessageRole.ASSISTANT.value and 'tool_calls' in msg:
+                tool_calls = msg['tool_calls']
+                # 如果tool_calls 里面的id 没有在其他的role 为tool 的消息中出现，就移除这个消息
+                if any(tool_call['id'] not in all_tool_call_ids_from_tool for tool_call in tool_calls):
+                    continue
+            new_messages.append(msg)
+        return new_messages
+    
+    def _call_llm_streaming(self, messages: List[Union[MessageChunk, Dict[str, Any]]], session_id: Optional[str] = None, step_name: str = "llm_call", model_config_override: Optional[Dict[str, Any]] = None):
+        """
+        通用的流式模型调用方法，有这个封装，主要是为了将
+        模型调用和日志记录等功能统一起来，以及token 的记录等，方便后续的维护和扩展。
+        
+        Args:
+            messages: 输入消息列表
+            session_id: 会话ID（用于请求记录）
+            step_name: 步骤名称（用于请求记录）
+            model_config_override: 覆盖模型配置（用于工具调用等）
+            
+        Returns:
+            Generator: 语言模型的流式响应
+        """
+        logger.debug(f"{self.__class__.__name__}: 调用语言模型进行流式生成")
+        
+        # 确定最终的模型配置
+        final_config = {**self.model_config}
+        if model_config_override:
+            final_config.update(model_config_override)
+        all_chunks = []
+
+        try:
+            # 发起LLM请求
+            # 将 MessageChunk 对象转换为字典，以便进行 JSON 序列化
+            serializable_messages = []
+            for msg in messages:
+                if isinstance(msg, MessageChunk):
+                    serializable_messages.append(msg.to_dict())
+                else:
+                    serializable_messages.append(msg)
+            
+            # 只保留model.chat.completions.create 需要的messages的key，移除掉不不要的
+            serializable_messages = [{k: v for k, v in msg.items() if k in ['role', 'content', 'tool_calls','tool_call_id']} for msg in serializable_messages]
+            # print("serializable_messages:",serializable_messages)
+            # 确保所有的messages 中都包含role 和 content
+            for msg in serializable_messages:
+                if 'role' not in msg:
+                    msg['role'] = MessageRole.USER.value
+                if 'content' not in msg:
+                    msg['content'] = ''
+
+
+            logger.info(f"{self.__class__.__name__}: 调用语言模型进行流式生成，模型配置: {final_config}")
+            
+            # 需要处理 serializable_messages 中，如果有tool call ，但是没有后续的tool call id,需要去掉这条消息
+            serializable_messages = self._remove_tool_call_without_id(serializable_messages)
+            
+            stream = self.model.chat.completions.create(
+                messages=serializable_messages,
+                stream=True,
+                stream_options={"include_usage": True},
+                extra_body={
+                    "chat_template_kwargs": {"enable_thinking": False},
+                    "enable_thinking":False,
+                    "thinking":{'type':"disabled"}
+                },
+                **final_config
+            )
+            # 直接yield chunks，不再收集用于日志记录
+            for chunk in stream:
+                # print(chunk)
+                all_chunks.append(chunk)
+                yield chunk
+
+        except Exception as e:
+            logger.error(f"{self.__class__.__name__}: LLM流式调用失败: {e}\n{traceback.format_exc()}")
+            all_chunks.append( ChatCompletionChunk(
+                id="",
+                object="chat.completion.chunk",
+                created=0,
+                model="",
+                choices=[
+                    Choice(
+                        index=0,
+                        delta=ChoiceDelta(
+                            content=traceback.format_exc(),
+                            tool_calls=None,
+                        ),
+                        finish_reason="stop",
+                    )
+                ],
+                usage=None,
+            ) )
+            raise e
+        finally:
+            # 将次请求记录在session context 中的llm调用记录中
+            if session_id:
+                # 调用seesion manager 中获取llm logger，然后记录请求以及完整的响应
+                session_context = get_session_context(session_id)
+
+                llm_request = {
+                    "step_name": step_name,
+                    "model_config": final_config,
+                    "messages": messages,
+                }
+                # 将流式的chunk，进行合并成非流式的response，保存下chunk所有的记录
+                try:
+                    llm_response =  merge_stream_response_to_non_stream_response(all_chunks)
+                except:
+                    logger.error(f"{self.__class__.__name__}: 合并流式响应失败: {traceback.format_exc()}")
+                    logger.error(f"{self.__class__.__name__}: 合并流式响应失败: {all_chunks}")
+                    llm_response = None
+                session_context.add_llm_request(llm_request,llm_response)
+
+    def prepare_unified_system_message(self,
+                                     session_id: Optional[str] = None,
+                                     custom_prefix: Optional[str] = None) -> MessageChunk:
+        """
+        准备统一的系统消息
+        
+        Args:
+            session_id: 会话ID
+            custom_prefix: 自定义前缀,会添加到system_prefix 后面，system context 前面
+            
+        Returns:
+            MessageChunk: 系统消息
+        """
+        system_prefix  = ""
+        if hasattr(self, 'SYSTEM_PREFIX_FIXED'):
+            system_prefix =  self.SYSTEM_PREFIX_FIXED
+        else:
+            if self.system_prefix:
+                system_prefix = self.system_prefix
+            else:
+                system_prefix += f"\n你是一个{self.__class__.__name__}智能体。"
+            
+            if custom_prefix:
+                system_prefix += custom_prefix +'\n'
+        
+        # 根据session_id获取session_context
+        if session_id:
+            session_context = get_session_context(session_id)
+            system_context_info = session_context.system_context
+            logger.debug(f"{self.__class__.__name__}: 添加运行时system_context到系统消息")
+            system_prefix += f"\n补充其他的信息：\n "
+            for key, value in system_context_info.items():
+                if isinstance(value, dict):
+                    # 如果值是字典，格式化显示
+                    formatted_dict = json.dumps(value, ensure_ascii=False, indent=2)
+                    system_prefix += f"{key}: {formatted_dict}\n"
+                elif isinstance(value, (list, tuple)):
+                    # 如果值是列表或元组，格式化显示
+                    formatted_list = json.dumps(list(value), ensure_ascii=False, indent=2)
+                    system_prefix += f"{key}: {formatted_list}\n"
+                else:
+                    # 其他类型直接转换为字符串
+                    system_prefix += f"{key}: {str(value)}\n"
+            logger.debug(f"{self.__class__.__name__}: 系统消息生成完成，总长度: {len(system_prefix)}")
+
+            # 补充当前工作空间中的文件情况，工作空间的路径是 session_context.agent_workspace,需要把这个文件夹下的文件或者文件夹，有可能多层路径，给展示出来，类似tree 结构，只展示文件的相对路径
+            current_agent_workspace = session_context.agent_workspace
+            if current_agent_workspace:
+                system_prefix += f"\n当前工作空间 {session_context.system_context['file_workspace']} 的文件情况：\n"
+                # 如果没有文件，就不展示了
+                if not os.listdir(current_agent_workspace):
+                    system_prefix += "当前工作空间下没有文件。\n"
+                else:
+                    for root, dirs, files in os.walk(current_agent_workspace):
+                        for file_item in files:
+                            system_prefix += f"{os.path.join(root, file_item).replace(current_agent_workspace, '').lstrip('/')}\n"
+                        for dir_item in dirs:
+                            system_prefix += f"{os.path.join(root, dir_item).replace(current_agent_workspace, '').lstrip('/')}/\n"
+                system_prefix += "\n"
+
+
+
+        return MessageChunk(
+            role=MessageRole.SYSTEM.value,
+            content=system_prefix,
+            type=MessageType.SYSTEM.value
+        )
+
     def _judge_delta_content_type(self, 
                                  delta_content: str, 
                                  all_tokens_str: str, 
                                  tag_type: List[str] = None) -> str:
-        """
-        判断增量内容的类型
-        
-        Args:
-            delta_content: 增量内容
-            all_tokens_str: 所有token字符串
-            tag_type: 标签类型列表
-            
-        Returns:
-            str: 内容类型
-        """
         if tag_type is None:
             tag_type = []
             
@@ -984,86 +321,3 @@ class AgentBase(ABC):
         elif last_tag in end_tag:
             return 'tag'
 
-    def _collect_and_log_stream_output(self, stream_generator: Generator[List[Dict[str, Any]], None, None]) -> Generator[List[Dict[str, Any]], None, None]:
-        """
-        收集流式输出并在最后记录完整日志的装饰器方法
-        
-        Args:
-            stream_generator: 流式输出生成器
-            
-        Yields:
-            List[Dict[str, Any]]: 流式输出的消息块
-        """
-        agent_name = self.__class__.__name__
-        logger.debug(f"🔍 {agent_name} 开始收集流式输出...")
-        
-        all_output_chunks = []
-        chunk_count = 0
-        
-        try:
-            for chunk_batch in stream_generator:
-                chunk_count += 1
-                all_output_chunks.extend(chunk_batch)
-                yield chunk_batch
-        except Exception as e:
-            logger.error(f"🔍 {agent_name} 在流式处理中发生异常: {str(e)}")
-            logger.error(f"🔍 {agent_name} 异常堆栈: {traceback.format_exc()}")
-            raise
-        finally:
-            logger.debug(f"🔍 {agent_name} 流式处理完成，总共收集 {len(all_output_chunks)} 个chunks")
-            
-            # 合并相同message_id的chunks
-            merged_messages = self._merge_chunks(all_output_chunks)
-            logger.debug(f"🔍 {agent_name} 合并后得到 {len(merged_messages)} 条消息")
-            
-            # 记录完整输出日志
-            self._log_agent_output(merged_messages)
-
-    def _extract_usage_from_chunk(self, chunk) -> Optional[Dict[str, Any]]:
-        """
-        从LLM chunk中提取usage信息的统一函数
-        
-        注意：这个函数用于在流式处理中为消息块添加usage信息，供前端显示使用。
-        真正的token统计是在_track_streaming_token_usage中完成的，只统计最终的usage信息，避免重复统计。
-        
-        两个用途：
-        1. 消息传递：每个消息块都包含当前可用的usage信息（可能是中间状态）
-        2. 统计汇总：只在最后统计一次完整的usage信息
-        
-        Args:
-            chunk: LLM响应chunk
-            
-        Returns:
-            Optional[Dict[str, Any]]: 提取的usage信息，如果没有则返回None
-        """
-        if hasattr(chunk, 'usage') and chunk.usage:
-            usage = chunk.usage
-            
-            # 处理不同模型的特殊字段 - 修复对象访问方式
-            cached_tokens = 0
-            reasoning_tokens = 0
-            
-            # 处理prompt_tokens_details
-            if hasattr(usage, 'prompt_tokens_details') and usage.prompt_tokens_details:
-                if hasattr(usage.prompt_tokens_details, 'cached_tokens'):
-                    cached_tokens = getattr(usage.prompt_tokens_details, 'cached_tokens', 0) or 0
-            else:
-                # 兼容性处理，某些模型可能直接在usage对象上有cached_tokens
-                cached_tokens = getattr(usage, 'cached_tokens', 0) or 0
-            
-            # 处理completion_tokens_details  
-            if hasattr(usage, 'completion_tokens_details') and usage.completion_tokens_details:
-                if hasattr(usage.completion_tokens_details, 'reasoning_tokens'):
-                    reasoning_tokens = getattr(usage.completion_tokens_details, 'reasoning_tokens', 0) or 0
-            else:
-                # 兼容性处理，某些模型可能直接在usage对象上有reasoning_tokens
-                reasoning_tokens = getattr(usage, 'reasoning_tokens', 0) or 0
-            
-            return {
-                'prompt_tokens': getattr(usage, 'prompt_tokens', 0),
-                'completion_tokens': getattr(usage, 'completion_tokens', 0),
-                'total_tokens': getattr(usage, 'total_tokens', 0),
-                'cached_tokens': cached_tokens,
-                'reasoning_tokens': reasoning_tokens
-            }
-        return None

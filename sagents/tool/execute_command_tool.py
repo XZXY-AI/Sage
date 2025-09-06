@@ -135,7 +135,7 @@ class ExecuteCommandTool(ToolBase):
     @ToolBase.tool()
     def execute_shell_command(self, command: str, workdir: Optional[str] = None, 
                              timeout: int = 30, env_vars: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
-        """在指定目录执行Shell命令
+        """在指定目录执行Shell命令，后台执行请通过command 进行设置
 
         Args:
             command (str): 要执行的Shell命令
@@ -173,7 +173,7 @@ class ExecuteCommandTool(ToolBase):
                     return {
                         "success": False,
                         "error": f"工作目录不存在: {workdir}",
-                        "command": command,
+                        # "command": command,
                         "process_id": process_id,
                         "execution_time": error_time
                     }
@@ -218,12 +218,12 @@ class ExecuteCommandTool(ToolBase):
                         "stdout": stdout,
                         "stderr": stderr,
                         "return_code": return_code,
-                        "command": command,
-                        "workdir": workdir,
+                        # "command": command,
+                        # "workdir": workdir,
                         "execution_time": execution_time,
-                        "total_time": total_time,
-                        "process_id": process_id,
-                        "pid": process.pid
+                        # "total_time": total_time,
+                        # "process_id": process_id,
+                        # "pid": process.pid
                     }
                 else:
                     logger.warning(f"⚠️ 命令执行失败 [{process_id}] - 返回码: {return_code}, 执行耗时: {execution_time:.2f}秒")
@@ -283,8 +283,8 @@ class ExecuteCommandTool(ToolBase):
 
     @ToolBase.tool()
     def execute_python_code(self, code: str, workdir: Optional[str] = None, 
-                           timeout: int = 30, requirements: Optional[List[str]] = None) -> Dict[str, Any]:
-        """在临时文件中执行Python代码
+                           timeout: int = 30, requirements: Optional[Union[str, List[str]]] = None) -> Dict[str, Any]:
+        """在临时执行Python代码，会话在执行完后会删除，不具有持久性
 
         Args:
             code (str): 要执行的Python代码
@@ -309,6 +309,8 @@ class ExecuteCommandTool(ToolBase):
             
             # 安装依赖包（如果需要）
             if requirements:
+                if isinstance(requirements, str):
+                    requirements = [requirements]
                 logger.info(f"📦 安装依赖包: {requirements}")
                 for package in requirements:
                     install_result = self.execute_shell_command(
@@ -352,11 +354,10 @@ class ExecuteCommandTool(ToolBase):
             
             # 添加额外信息
             result.update({
-                "code": code,
-                "temp_file": temp_file,
+                # "temp_file": temp_file,
                 "requirements": requirements,
                 "total_execution_time": total_time,
-                "process_id": process_id
+                # "process_id": process_id
             })
             
             return result

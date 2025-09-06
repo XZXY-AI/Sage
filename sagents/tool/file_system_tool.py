@@ -21,7 +21,7 @@ from typing import Dict, Any, List, Optional, Union
 
 from .tool_base import ToolBase
 from sagents.utils.logger import logger
-
+import pandas as pd
 class FileSystemError(Exception):
     """文件系统异常"""
     pass
@@ -142,20 +142,21 @@ class FileSystemTool(ToolBase):
         self.default_headers = {"User-Source": 'AskOnce_bakend'}
 
     @ToolBase.tool()
-    def file_read(self, file_path: str, start_line: int = 0, end_line: Optional[int] = None, 
+    def file_read(self, file_path: str, start_line: int = 0, end_line: Optional[int] = 20, 
                   encoding: str = "auto", max_size_mb: float = 10.0) -> Dict[str, Any]:
-        """高级文件读取工具
+        """高级文件读取工具，读取文本文件，例如txt，以及配置文件和代码文件
 
         Args:
             file_path (str): 文件绝对路径
             start_line (int): 开始行号，默认0
-            end_line (int): 结束行号（不包含），None表示读取到末尾
+            end_line (int): 结束行号（不包含），默认20
             encoding (str): 文件编码，'auto'表示自动检测
             max_size_mb (float): 最大读取文件大小（MB），默认10MB
 
         Returns:
             Dict[str, Any]: 包含文件内容和元信息
         """
+        
         start_time = time.time()
         operation_id = hashlib.md5(f"read_{file_path}_{time.time()}".encode()).hexdigest()[:8]
         logger.info(f"📖 file_read开始执行 [{operation_id}] - 文件: {file_path}")
@@ -206,6 +207,7 @@ class FileSystemTool(ToolBase):
             
             total_time = time.time() - start_time
             
+            # 返回结果处理掉前置路径
             return {
                 "status": "success",
                 "message": f"成功读取文件 (行 {start_line}-{end_line})",
@@ -234,7 +236,7 @@ class FileSystemTool(ToolBase):
 
     @ToolBase.tool()
     def file_write(self, file_path: str, content: str, mode: str = "overwrite", 
-                   encoding: str = "utf-8", auto_upload: bool = True) -> Dict[str, Any]:
+                   encoding: str = "utf-8") -> Dict[str, Any]:
         """智能文件写入工具
 
         Args:
@@ -247,6 +249,7 @@ class FileSystemTool(ToolBase):
         Returns:
             Dict[str, Any]: 操作结果和文件信息
         """
+        
         start_time = time.time()
         operation_id = hashlib.md5(f"write_{file_path}_{time.time()}".encode()).hexdigest()[:8]
         logger.info(f"✏️ file_write开始执行 [{operation_id}] - 文件: {file_path}")
@@ -310,17 +313,17 @@ class FileSystemTool(ToolBase):
             }
             
             # 自动上传到云端
-            if auto_upload:
-                try:
-                    upload_result = self.upload_file_to_cloud(file_path)
-                    if upload_result["status"] == "success":
-                        result["cloud_url"] = upload_result["url"]
-                        result["file_id"] = upload_result.get("file_id")
-                        result["message"] += "，已上传到云端"
-                    else:
-                        result["upload_error"] = upload_result["message"]
-                except Exception as e:
-                    result["upload_error"] = f"云端上传失败: {str(e)}"
+            # if auto_upload:
+            #     try:
+            #         upload_result = self.upload_file_to_cloud(file_path)
+            #         if upload_result["status"] == "success":
+            #             result["cloud_url"] = upload_result["url"]
+            #             result["file_id"] = upload_result.get("file_id")
+            #             result["message"] += "，已上传到云端"
+            #         else:
+            #             result["upload_error"] = upload_result["message"]
+            #     except Exception as e:
+            #         result["upload_error"] = f"云端上传失败: {str(e)}"
             
             total_time = time.time() - start_time
             result["execution_time"] = total_time
@@ -331,82 +334,197 @@ class FileSystemTool(ToolBase):
             logger.error(f"💥 文件写入异常 [{operation_id}] - 错误: {str(e)}")
             return {"status": "error", "message": f"文件写入失败: {str(e)}", "operation_id": operation_id}
 
-    @ToolBase.tool()
-    def upload_file_to_cloud(self, file_path: str) -> Dict[str, Any]:
-        """上传文件到云端存储
+    # @ToolBase.tool()
+    # def upload_file_to_cloud(self, file_path: str) -> Dict[str, Any]:
+    #     """上传文件到云端存储
         
-        Args:
-            file_path (str): 要上传的文件路径
+    #     Args:
+    #         file_path (str): 要上传的文件路径
             
-        Returns:
-            Dict[str, Any]: 上传结果，包含状态和文件URL
-        """
-        start_time = time.time()
-        operation_id = hashlib.md5(f"upload_cloud_{file_path}_{time.time()}".encode()).hexdigest()[:8]
-        logger.info(f"☁️ upload_file_to_cloud开始执行 [{operation_id}] - 文件: {file_path}")
+    #     Returns:
+    #         Dict[str, Any]: 上传结果，包含状态和文件URL
+    #     """
+    #     start_time = time.time()
+    #     operation_id = hashlib.md5(f"upload_cloud_{file_path}_{time.time()}".encode()).hexdigest()[:8]
+    #     logger.info(f"☁️ upload_file_to_cloud开始执行 [{operation_id}] - 文件: {file_path}")
         
+    #     try:
+    #         # 检查文件是否存在
+    #         if not os.path.exists(file_path):
+    #             return {"status": "error", "message": "文件不存在"}
+            
+    #         # 获取文件信息
+    #         file_name = os.path.basename(file_path)
+    #         file_size = os.path.getsize(file_path)
+    #         file_size_mb = file_size / (1024 * 1024)
+            
+    #         # 检查文件大小（限制100MB）
+    #         if file_size > 100 * 1024 * 1024:
+    #             return {"status": "error", "message": "文件过大，超过100MB限制"}
+            
+    #         # 准备上传
+    #         url = self.default_upload_url
+    #         headers = self.default_headers
+            
+    #         # 发起上传请求
+    #         upload_start_time = time.time()
+    #         with open(file_path, 'rb') as f:
+    #             files = {'file': (file_name, f, 'application/octet-stream')}
+    #             response = requests.post(url, headers=headers, files=files, timeout=60)
+            
+    #         upload_time = time.time() - upload_start_time
+    #         response.raise_for_status()
+            
+    #         # 处理响应
+    #         json_data = response.json()
+    #         file_url = json_data.get('data', {}).get('url')
+    #         file_id = json_data.get('data', {}).get('fileId')
+            
+    #         if not file_url:
+    #             return {
+    #                 "status": "error", 
+    #                 "message": "API返回成功但缺少文件URL",
+    #                 "response": json_data
+    #             }
+            
+    #         total_time = time.time() - start_time
+            
+    #         return {
+    #             "status": "success", 
+    #             "message": "文件上传成功", 
+    #             "url": file_url,
+    #             "file_id": file_id,
+    #             "file_name": file_name,
+    #             "file_size": file_size,
+    #             "file_size_mb": file_size_mb,
+    #             "upload_time": upload_time,
+    #             "total_time": total_time,
+    #             "operation_id": operation_id
+    #         }
+                
+    #     except requests.exceptions.Timeout:
+    #         return {"status": "error", "message": "上传超时"}
+    #     except requests.exceptions.RequestException as e:
+    #         return {"status": "error", "message": f"网络请求失败: {str(e)}"}
+    #     except Exception as e:
+    #         logger.error(f"💥 上传异常 [{operation_id}] - 错误: {str(e)}")
+    #         return {"status": "error", "message": f"上传失败: {str(e)}"}
+
+    @ToolBase.tool()
+    def search_content_in_file(self, file_path: str, keywords:list[str],return_search_item=5) -> Dict[str, Any]:
+        
+        """在文件中通过关键词匹配，搜索相关的内容的上下文内容
+        Args:
+            file_path (str): 要搜索的文件路径
+            keywords (list[str]): 要搜索的关键词列表
+            return_search_item (int, optional): 返回的搜索结果数量，默认5个. Defaults to 5.
+        Returns:
+            Dict[str, Any]: 搜索结果，包含匹配的内容和上下文
+        """
+        context_size = 800
+        return_search_item = int(return_search_item)
+        start_time = time.time()
+        operation_id = hashlib.md5(f"search_file_{file_path}_{time.time()}".encode()).hexdigest()[:8]
+        logger.info(f"🔍 search_content_in_file开始执行 [{operation_id}] - 文件: {file_path}")
         try:
             # 检查文件是否存在
             if not os.path.exists(file_path):
                 return {"status": "error", "message": "文件不存在"}
             
-            # 获取文件信息
-            file_name = os.path.basename(file_path)
-            file_size = os.path.getsize(file_path)
-            file_size_mb = file_size / (1024 * 1024)
+            # 读取文件的全部内容
+            with open(file_path, 'r', encoding='utf-8') as f:
+                file_content = f.read()
+
+            # 存储搜索结果
+            search_results = []
+            file_content_lower = file_content.lower()
             
-            # 检查文件大小（限制100MB）
-            if file_size > 100 * 1024 * 1024:
-                return {"status": "error", "message": "文件过大，超过100MB限制"}
+            # 找到所有关键词的匹配位置
+            keyword_positions = {}
+            for keyword in keywords:
+                keyword_lower = keyword.lower()
+                positions = []
+                start = 0
+                while True:
+                    pos = file_content_lower.find(keyword_lower, start)
+                    if pos == -1:
+                        break
+                    positions.append(pos)
+                    start = pos + 1
+                keyword_positions[keyword] = positions
             
-            # 准备上传
-            url = self.default_upload_url
-            headers = self.default_headers
+            # 收集所有匹配位置并计算上下文
+            all_positions = []
+            for keyword, positions in keyword_positions.items():
+                for pos in positions:
+                    all_positions.append((pos, keyword))
             
-            # 发起上传请求
-            upload_start_time = time.time()
-            with open(file_path, 'rb') as f:
-                files = {'file': (file_name, f, 'application/octet-stream')}
-                response = requests.post(url, headers=headers, files=files, timeout=60)
+            # 按位置排序
+            all_positions.sort()
             
-            upload_time = time.time() - upload_start_time
-            response.raise_for_status()
+            # 合并相近的匹配位置，避免重复的上下文
+            merged_results = []
+            for pos, keyword in all_positions:
+                # 计算上下文范围
+                start_char = max(0, pos - context_size // 2)
+                end_char = min(len(file_content), pos + context_size // 2)
+                
+                # 检查是否与已有结果重叠
+                overlapped = False
+                for existing in merged_results:
+                    if (start_char < existing['end_char'] and end_char > existing['start_char']):
+                        # 合并重叠区域
+                        existing['start_char'] = min(existing['start_char'], start_char)
+                        existing['end_char'] = max(existing['end_char'], end_char)
+                        if keyword not in existing['matched_keywords']:
+                            existing['matched_keywords'].append(keyword)
+                            existing['score'] += 1
+                        overlapped = True
+                        break
+                
+                if not overlapped:
+                    # 提取上下文内容
+                    context = file_content[start_char:end_char]
+                    merged_results.append({
+                        'score': 1,
+                        'matched_keywords': [keyword],
+                        'context': context.strip(),
+                        'start_char': start_char,
+                        'end_char': end_char,
+                        'match_position': pos
+                    })
             
-            # 处理响应
-            json_data = response.json()
-            file_url = json_data.get('data', {}).get('url')
-            file_id = json_data.get('data', {}).get('fileId')
+            # 按分数降序排序，分数相同时按匹配位置升序
+            merged_results.sort(key=lambda x: (-x['score'], x['match_position']))
             
-            if not file_url:
-                return {
-                    "status": "error", 
-                    "message": "API返回成功但缺少文件URL",
-                    "response": json_data
-                }
+            # 限制返回结果数量
+            search_results = merged_results[:return_search_item]
             
-            total_time = time.time() - start_time
+            execution_time = time.time() - start_time
+            logger.info(f"✅ search_content_in_file执行完成 [{operation_id}] - 耗时: {execution_time:.2f}s, 找到 {len(search_results)} 个匹配项")
             
             return {
-                "status": "success", 
-                "message": "文件上传成功", 
-                "url": file_url,
-                "file_id": file_id,
-                "file_name": file_name,
-                "file_size": file_size,
-                "file_size_mb": file_size_mb,
-                "upload_time": upload_time,
-                "total_time": total_time,
+                "status": "success",
+                "message": f"搜索完成，找到 {len(search_results)} 个匹配项",
+                "results": search_results,
+                "total_matches": len(search_results),
+                "keywords": keywords,
+                "execution_time": execution_time,
                 "operation_id": operation_id
             }
-                
-        except requests.exceptions.Timeout:
-            return {"status": "error", "message": "上传超时"}
-        except requests.exceptions.RequestException as e:
-            return {"status": "error", "message": f"网络请求失败: {str(e)}"}
+            
         except Exception as e:
-            logger.error(f"💥 上传异常 [{operation_id}] - 错误: {str(e)}")
-            return {"status": "error", "message": f"上传失败: {str(e)}"}
+            execution_time = time.time() - start_time
+            error_msg = f"搜索文件内容时发生错误: {str(e)}"
+            logger.error(f"❌ search_content_in_file执行失败 [{operation_id}] - {error_msg} - 耗时: {execution_time:.2f}s")
+            return {
+                "status": "error",
+                "message": error_msg,
+                "execution_time": execution_time,
+                "operation_id": operation_id
+            }
 
+    
     @ToolBase.tool()
     def download_file_from_url(self, url: str, working_dir: str) -> Dict[str, Any]:
         """从URL下载文件并保存到指定目录
@@ -418,6 +536,7 @@ class FileSystemTool(ToolBase):
         Returns:
             Dict[str, Any]: 下载结果，包含保存的文件路径
         """
+
         start_time = time.time()
         operation_id = hashlib.md5(f"download_{url}_{time.time()}".encode()).hexdigest()[:8]
         logger.info(f"📥 download_file_from_url开始执行 [{operation_id}] - URL: {url}")
@@ -494,53 +613,9 @@ class FileSystemTool(ToolBase):
             return {"status": "error", "message": f"下载失败: {str(e)}"}
 
     @ToolBase.tool()
-    def get_file_info(self, file_path: str) -> Dict[str, Any]:
-        """获取文件详细信息
-
-        Args:
-            file_path (str): 文件或目录的绝对路径
-
-        Returns:
-            Dict[str, Any]: 文件详细信息
-        """
-        try:
-            # 安全验证
-            validation = SecurityValidator.validate_path(file_path)
-            if not validation["valid"]:
-                return {"status": "error", "message": validation["error"]}
-            
-            file_path = validation["resolved_path"]
-            
-            # 获取基础信息
-            info = FileMetadata.get_file_info(file_path)
-            if not info["exists"]:
-                return {"status": "error", "message": "文件或目录不存在"}
-            
-            # 为小文件添加校验和
-            if info["is_file"] and info["size_mb"] < 10:
-                try:
-                    with open(file_path, 'rb') as f:
-                        content = f.read()
-                    info["checksums"] = {
-                        "md5": hashlib.md5(content).hexdigest(),
-                        "sha256": hashlib.sha256(content).hexdigest()
-                    }
-                except Exception as e:
-                    info["checksum_error"] = str(e)
-            
-            return {
-                "status": "success",
-                "message": "文件信息获取成功",
-                "file_info": info
-            }
-            
-        except Exception as e:
-            return {"status": "error", "message": f"获取文件信息失败: {str(e)}"}
-
-    @ToolBase.tool()
-    def search_and_replace(self, file_path: str, search_pattern: str, replacement: str, 
+    def replace_text_in_file(self, file_path: str, search_pattern: str, replacement: str, 
                           use_regex: bool = False, case_sensitive: bool = True) -> Dict[str, Any]:
-        """在文件中搜索并替换文本
+        """在文件中搜索某端文件并使用另一段文本替换该文本
 
         Args:
             file_path (str): 文件绝对路径
@@ -552,6 +627,7 @@ class FileSystemTool(ToolBase):
         Returns:
             Dict[str, Any]: 替换结果统计
         """
+        
         try:
             # 安全验证
             validation = SecurityValidator.validate_path(file_path)
@@ -567,7 +643,7 @@ class FileSystemTool(ToolBase):
             
             # 读取文件
             encoding = file_info.get("encoding", "utf-8")
-            with open(file_path, 'r', encoding=encoding) as f:
+            with open(file_path, 'r', encoding=encoding, errors='ignore') as f:
                 original_content = f.read()
             
             # 执行搜索替换
@@ -584,7 +660,7 @@ class FileSystemTool(ToolBase):
                     new_content, replace_count = pattern.subn(replacement, original_content)
             
             # 写入修改后的内容
-            with open(file_path, 'w', encoding=encoding) as f:
+            with open(file_path, 'w', encoding=encoding, errors='ignore') as f:
                 f.write(new_content)
             
             return {
@@ -602,3 +678,31 @@ class FileSystemTool(ToolBase):
             return {"status": "error", "message": f"正则表达式错误: {str(e)}"}
         except Exception as e:
             return {"status": "error", "message": f"搜索替换失败: {str(e)}"} 
+    
+    @ToolBase.tool()
+    def convert_csv_to_excel(self, csv_file_path: str, excel_file_path: str) -> Dict[str, Any]:
+        """将CSV文件转换为Excel文件
+
+        Args:
+            csv_file_path (str): 输入的CSV文件路径
+            excel_file_path (str): 输出的Excel文件路径
+
+        Returns:
+            Dict[str, Any]: 转换结果
+        """
+        
+        # 检查文件是否存在
+        if not os.path.exists(csv_file_path):
+            return {"status": "error", "message": "输入的CSV文件不存在"}
+        
+        # 读取CSV文件
+        df = pd.read_csv(csv_file_path)
+        
+        # 写入Excel文件
+        df.to_excel(excel_file_path, index=False)
+        
+        return {
+            "status": "success",
+            "message": "CSV文件已成功转换为Excel文件",
+            "excel_file_path": excel_file_path
+        }
