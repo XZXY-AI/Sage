@@ -859,6 +859,97 @@ async def get_upcoming_competitive_matches(
         return f"An unexpected error occurred in get_upcoming_competitive_matches: [Type: {type(e).__name__}] - [Details: {repr(e)}]"
 
 
+# 获取历史任九期次
+# http://ai-match.fengkuangtiyu.cn/api/v5/matches/getHistoryNineMatchIssueList
+@mcp.tool()
+async def get_history_nine_match_issue_list() -> Union[Dict[str, Any], str]:
+    """
+    获取历史任九期次列表。
+    Fetches the list of historical nine-match lottery issues.
+
+    Returns:
+        Union[Dict[str, Any], str]: 成功时返回历史期次数据，失败时返回错误信息字符串。
+    """
+    endpoint = "http://ai-match.fengkuangtiyu.cn/api/v5/matches/getHistoryNineMatchIssueList"
+
+    print(f"Executing get_history_nine_match_issue_list")
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(endpoint)
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        return f"API request failed with status {e.response.status_code}: {e.response.text}"
+    except Exception as e:
+        import traceback
+        print(f"--- DETAILED ERROR IN get_history_nine_match_issue_list ---")
+        traceback.print_exc()
+        return f"An unexpected error occurred in get_history_nine_match_issue_list: [Type: {type(e).__name__}] - [Details: {repr(e)}]"
+
+
+# 获取未结束任九期次
+# http://ai-match.fengkuangtiyu.cn/api/v5/matches/getNotStartNineMatchIssueList
+@mcp.tool()
+async def get_not_start_nine_match_issue_list() -> Union[Dict[str, Any], str]:
+    """
+    获取未结束任九期次列表。
+    Fetches the list of unfinished nine-match lottery issues.
+
+    Returns:
+        Union[Dict[str, Any], str]: 成功时返回未结束期次数据，失败时返回错误信息字符串。
+    """
+    endpoint = "http://ai-match.fengkuangtiyu.cn/api/v5/matches/getNotStartNineMatchIssueList"
+
+    print(f"Executing get_not_start_nine_match_issue_list")
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(endpoint)
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        return f"API request failed with status {e.response.status_code}: {e.response.text}"
+    except Exception as e:
+        import traceback
+        print(f"--- DETAILED ERROR IN get_not_start_nine_match_issue_list ---")
+        traceback.print_exc()
+        return f"An unexpected error occurred in get_not_start_nine_match_issue_list: [Type: {type(e).__name__}] - [Details: {repr(e)}]"
+
+
+# 获取任九期次比赛列表
+# http://ai-match.fengkuangtiyu.cn/api/v5/matches/getIssueMatchList?issue=2025132
+@mcp.tool()
+async def get_issue_match_list(issue: str) -> Union[Dict[str, Any], str]:
+    """
+    获取任九期次比赛列表。
+    Fetches the match list for a specific nine-match lottery issue.
+
+    Args:
+        issue (str): 期次（必填），例如 '2025132'。
+
+    Returns:
+        Union[Dict[str, Any], str]: 成功时返回期次比赛数据，失败时返回错误信息字符串。
+    """
+    endpoint = "http://ai-match.fengkuangtiyu.cn/api/v5/matches/getIssueMatchList"
+    params = {"issue": issue}
+
+    print(f"Executing get_issue_match_list with params: {params}")
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(endpoint, params=params)
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        return f"API request failed with status {e.response.status_code}: {e.response.text}"
+    except Exception as e:
+        import traceback
+        print(f"--- DETAILED ERROR IN get_issue_match_list ---")
+        traceback.print_exc()
+        return f"An unexpected error occurred in get_issue_match_list: [Type: {type(e).__name__}] - [Details: {repr(e)}]"
+
+
 # 4. 启动 Web 服务器的代码 (不变)
 if __name__ == "__main__":
     app = Starlette(
