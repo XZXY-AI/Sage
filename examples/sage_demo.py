@@ -116,17 +116,24 @@ class ComponentManager:
         """初始化模型"""
         logger.debug(f"初始化模型，base_url: {self.settings.model.base_url}")
         try:
-            # vvv 新增的 Azure 处理逻辑 vvv
+            # Azure 处理逻辑
             if "azure.com" in self.settings.model.base_url:
                 logger.info("检测到 Azure 配置，使用 AzureOpenAI 客户端")
                 return AzureOpenAI(
                     api_key=self.settings.model.api_key,
                     azure_endpoint=self.settings.model.base_url,
-                    api_version="2025-01-01-preview"  # 建议使用一个稳定且常用的 api-version
+                    api_version="2025-01-01-preview"
                 )
-            # ^^^ 新增的 Azure 处理逻辑 ^^^
+            
+            # Ollama 处理逻辑
+            if ":11434" in self.settings.model.base_url or "ollama" in self.settings.model.base_url.lower():
+                logger.info("检测到 Ollama 配置，使用 OpenAI 兼容模式")
+                return OpenAI(
+                    api_key="ollama",  # Ollama 不需要真实的 API key
+                    base_url=self.settings.model.base_url + "/v1"  # Ollama OpenAI 兼容端点
+                )
 
-            # 保留原来的逻辑作为默认选项
+            # 默认 OpenAI 兼容客户端
             return OpenAI(
                 api_key=self.settings.model.api_key,
                 base_url=self.settings.model.base_url
@@ -534,18 +541,20 @@ def parse_arguments() -> Dict[str, Any]:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例用法:
-  python sage_demo.py --api_key YOUR_API_KEY
-  python sage_demo.py --api_key YOUR_API_KEY --model gpt-4 --tools_folders ./tools
+  python sage_demo.py  # 使用默认 Ollama 配置
+  python sage_demo.py --model qwen3:14b --base_url http://150.136.165.98:11434
+  python sage_demo.py --api_key YOUR_API_KEY --model gpt-4 --base_url https://openrouter.ai/api/v1
         """
     )
     
-    parser.add_argument('--api_key', required=True, 
-                       help='OpenRouter API key（必需）')
+    parser.add_argument('--api_key', 
+                       default='ollama',
+                       help='API key（Ollama 使用默认值 "ollama"）')
     parser.add_argument('--model', 
-                       default='mistralai/mistral-small-3.1-24b-instruct:free',
+                       default='qwen3:14b',
                        help='模型名称')
     parser.add_argument('--base_url', 
-                       default='https://openrouter.ai/api/v1',
+                       default='http://150.136.165.98:11434',
                        help='API base URL')
     parser.add_argument('--tools_folders', nargs='+', default=[],
                        help='工具目录路径（多个路径用空格分隔）')
