@@ -222,6 +222,11 @@ class AgentBase(ABC):
                     logger.error(f"{self.__class__.__name__}: 记录LLM请求日志失败: {log_error}")
             
             # 发起LLM请求
+            # 检查是否需要添加 chat_template_kwargs（用于 vLLM 禁用思考模式）
+            if hasattr(self.model, '_default_extra_body'):
+                final_config['extra_body'] = self.model._default_extra_body
+                logger.debug(f"{self.__class__.__name__}: 添加 extra_body 参数: {self.model._default_extra_body}")
+            
             stream = self.model.chat.completions.create(
                 messages=messages,
                 stream=True,
@@ -288,11 +293,16 @@ class AgentBase(ABC):
                     logger.error(f"{self.__class__.__name__}: 记录LLM请求日志失败: {log_error}")
             
             # 发起LLM请求
+            # 检查是否需要添加 chat_template_kwargs（用于 vLLM 禁用思考模式）
+            if hasattr(self.model, '_default_extra_body'):
+                final_config['extra_body'] = self.model._default_extra_body
+                logger.debug(f"{self.__class__.__name__}: 添加 extra_body 参数: {self.model._default_extra_body}")
+            
             response = self.model.chat.completions.create(
-            messages=messages,
-            stream=False,
+                messages=messages,
+                stream=False,
                 **final_config
-        )
+            )
             return response
         except Exception as e:
             logger.error(f"{self.__class__.__name__}: LLM非流式调用失败: {e}")

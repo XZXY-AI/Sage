@@ -128,10 +128,13 @@ class ComponentManager:
             # vLLM 处理逻辑 - 支持工具调用和流式响应
             if ":8000" in self.settings.model.base_url or "vllm" in self.settings.model.base_url.lower():
                 logger.info("检测到 vLLM 配置，使用 OpenAI 兼容模式（支持工具调用）")
-                return OpenAI(
+                client = OpenAI(
                     api_key=self.settings.model.api_key or "token-abc123",  # vLLM 可以使用任意 token
                     base_url=self.settings.model.base_url
                 )
+                # 为 vLLM 客户端添加默认的 chat_template_kwargs
+                client._default_extra_body = {"chat_template_kwargs": {"enable_thinking": False}}
+                return client
             
             # Ollama 处理逻辑
             if ":11434" in self.settings.model.base_url or "ollama" in self.settings.model.base_url.lower():
