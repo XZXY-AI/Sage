@@ -541,8 +541,8 @@ def parse_arguments() -> Dict[str, Any]:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例用法:
-  python sage_demo.py  # 使用默认 Qwen2-7B-Instruct 配置
-  python sage_demo.py --model Qwen/Qwen2-7B-Instruct --base_url http://150.136.165.98:8000/v1
+  python sage_demo.py  # 使用默认 Qwen3-14B-AWQ 配置
+  python sage_demo.py --model Qwen/Qwen3-14B-AWQ --base_url http://150.136.165.98:8000/v1
   python sage_demo.py --api_key YOUR_API_KEY --model gpt-4 --base_url https://openrouter.ai/api/v1
         """
     )
@@ -551,7 +551,7 @@ def parse_arguments() -> Dict[str, Any]:
                        default='dummy-key',
                        help='API key（使用默认值 "dummy-key"）')
     parser.add_argument('--model', 
-                       default='Qwen/Qwen2-7B-Instruct',
+                       default='Qwen/Qwen3-14B-AWQ',
                        help='模型名称')
     parser.add_argument('--base_url', 
                        default='http://150.136.165.98:8000/v1',
