@@ -223,15 +223,25 @@ class AgentBase(ABC):
             
             # 发起LLM请求
             stream = self.model.chat.completions.create(
-            messages=messages,
-            stream=True,
-            stream_options={"include_usage": True},
+                messages=messages,
+                stream=True,
+                stream_options={"include_usage": True},
                 **final_config
-        )
+            )
             
-            # 直接yield chunks，不再收集用于日志记录
+            # 直接yield chunks，确保每个chunk都是正确的对象类型
             for chunk in stream:
-                yield chunk
+                # 检查chunk是否为tuple，如果是则解包
+                if isinstance(chunk, tuple):
+                    logger.warning(f"{self.__class__.__name__}: 检测到tuple类型的chunk，尝试解包")
+                    # 通常tuple的第一个元素是实际的chunk对象
+                    if len(chunk) > 0:
+                        yield chunk[0]
+                    else:
+                        logger.warning(f"{self.__class__.__name__}: 空tuple chunk，跳过")
+                        continue
+                else:
+                    yield chunk
                 
         except Exception as e:
             logger.error(f"{self.__class__.__name__}: LLM流式调用失败: {e}")
