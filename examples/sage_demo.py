@@ -337,7 +337,7 @@ def setup_ui():
     
     # 使用默认值
     use_multi_agent = False
-    use_deepthink = False
+    use_deepthink = True
     
     return use_multi_agent, use_deepthink
 
