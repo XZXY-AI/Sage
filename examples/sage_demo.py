@@ -391,12 +391,8 @@ def process_user_input(user_input: str, tool_manager: ToolManager, controller: A
     """处理用户输入"""
     logger.info(f"处理用户输入: {user_input[:50]}{'...' if len(user_input) > 50 else ''}")
     
-    # 如果是首次输入，拼接预制提示词
-    if st.session_state.is_first_input:
-        actual_input = PREDEFINED_PROMPT + user_input
-        st.session_state.is_first_input = False
-    else:
-        actual_input = user_input + "，仅需回答当前的这个问题"
+    # 每次都使用预制提示词，创建新的对话
+    actual_input = PREDEFINED_PROMPT + user_input
     
     # 创建用户消息（使用拼接后的内容）
     user_msg = create_user_message(actual_input)
@@ -405,7 +401,6 @@ def process_user_input(user_input: str, tool_manager: ToolManager, controller: A
     
     # 添加到对话历史（推理用拼接后的，显示用原始的）
     st.session_state.conversation.append(display_user_msg)
-    st.session_state.inference_conversation.append(user_msg)
     
     # 显示用户消息（只显示原始输入）
     with st.chat_message("user"):
@@ -414,36 +409,30 @@ def process_user_input(user_input: str, tool_manager: ToolManager, controller: A
     # 处理响应
     with st.spinner("🤔 正在思考..."):
         try:
-            generate_response(tool_manager, controller)
+            generate_response([user_msg], tool_manager, controller)
         except Exception as e:
             logger.error(f"生成响应时出错: {str(e)}")
             with st.chat_message("assistant"):
                 st.error(f"抱歉，处理您的请求时出现了错误: {str(e)}")
 
 
-def generate_response(tool_manager: ToolManager, controller: AgentController):
+def generate_response(messages: List[Dict[str, Any]], tool_manager: ToolManager, controller: AgentController):
     """生成智能体响应"""
     streaming_handler = StreamingHandler(controller)
     
-    # 处理流式响应
+    # 处理流式响应（使用新的消息，不累积历史）
     new_messages = streaming_handler.process_stream(
-        st.session_state.inference_conversation.copy(),
+        messages,
         tool_manager,
         session_id=None,
         use_deepthink=st.session_state.get('use_deepthink', True),
         use_multi_agent=st.session_state.get('use_multi_agent', True)
     )
     
-    # 合并消息
+    # 更新显示对话
     if new_messages:
-        merged_messages = controller.task_analysis_agent._merge_messages(
-            st.session_state.inference_conversation, new_messages
-        )
-        st.session_state.inference_conversation = merged_messages
-        
-        # 更新显示对话
-        display_messages = convert_messages_for_show(merged_messages)
-        st.session_state.conversation = display_messages
+        display_messages = convert_messages_for_show(new_messages)
+        st.session_state.conversation.extend(display_messages)
         
         logger.info("响应生成完成")
 
@@ -569,7 +558,7 @@ def parse_arguments() -> Dict[str, Any]:
                        help='API base URL')
     parser.add_argument('--tools_folders', nargs='+', default=[],
                        help='工具目录路径（多个路径用空格分隔）')
-    parser.add_argument('--max_tokens', type=int, default=8192,
+    parser.add_argument('--max_tokens', type=int, default=4096,
                        help='最大令牌数')
     parser.add_argument('--temperature', type=float, default=0.2,
                        help='温度参数')
