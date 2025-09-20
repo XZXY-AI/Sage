@@ -601,6 +601,9 @@ class DirectExecutorAgent(AgentBase):
                     logger.info(f"DirectExecutorAgent: 更新工具调用: {last_tool_call_id}, 工具名称: {tool_call.function.name}")
                     tool_calls[last_tool_call_id]['function']['name'] = tool_call.function.name
                 if tool_call.function.arguments:
+                    # 确保 arguments 不是 None
+                    if tool_calls[last_tool_call_id]['function']['arguments'] is None:
+                        tool_calls[last_tool_call_id]['function']['arguments'] = ""
                     tool_calls[last_tool_call_id]['function']['arguments'] += tool_call.function.arguments
 
     def _handle_tool_calls(self, 
