@@ -569,7 +569,7 @@ def parse_arguments() -> Dict[str, Any]:
                        help='API base URL')
     parser.add_argument('--tools_folders', nargs='+', default=[],
                        help='工具目录路径（多个路径用空格分隔）')
-    parser.add_argument('--max_tokens', type=int, default=2048,
+    parser.add_argument('--max_tokens', type=int, default=16384,
                        help='最大令牌数')
     parser.add_argument('--temperature', type=float, default=0.2,
                        help='温度参数')
