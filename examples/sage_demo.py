@@ -116,15 +116,15 @@ class ComponentManager:
         """初始化模型"""
         logger.debug(f"初始化模型，base_url: {self.settings.model.base_url}")
         try:
-            # vvv 新增的 Azure 处理逻辑 vvv
+            # Azure OpenAI 配置
             if "azure.com" in self.settings.model.base_url:
                 logger.info("检测到 Azure 配置，使用 AzureOpenAI 客户端")
                 return AzureOpenAI(
                     api_key=self.settings.model.api_key,
                     azure_endpoint=self.settings.model.base_url,
-                    api_version="2025-01-01-preview"  # 建议使用一个稳定且常用的 api-version
+                    api_version="2025-01-01-preview"
                 )
-            # ^^^ 新增的 Azure 处理逻辑 ^^^
+            # Azure OpenAI 配置结束
 
             # 保留原来的逻辑作为默认选项
             return OpenAI(
@@ -535,14 +535,15 @@ def parse_arguments() -> Dict[str, Any]:
         """
     )
     
-    parser.add_argument('--api_key', required=True, 
-                       help='OpenRouter API key（必需）')
+    parser.add_argument('--api_key', 
+                       default='2a3981750a3a4110b25296b6c064c99a',
+                       help='Azure OpenAI API key')
     parser.add_argument('--model', 
-                       default='mistralai/mistral-small-3.1-24b-instruct:free',
+                       default='gpt-4.1',
                        help='模型名称')
     parser.add_argument('--base_url', 
-                       default='https://openrouter.ai/api/v1',
-                       help='API base URL')
+                       default='https://openai-api-aiapp-usest.openai.azure.com',
+                       help='Azure OpenAI endpoint')
     parser.add_argument('--tools_folders', nargs='+', default=[],
                        help='工具目录路径（多个路径用空格分隔）')
     parser.add_argument('--max_tokens', type=int, default=4096,
