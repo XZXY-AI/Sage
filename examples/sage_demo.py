@@ -25,7 +25,7 @@ from openai import OpenAI, AzureOpenAI
 
 # 设置页面配置 - 必须在任何其他streamlit调用之前
 st.set_page_config(
-    page_title="新质向阳多智能体自动架构平台",
+    page_title="Sage多智能体自动架构平台",
     page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -286,7 +286,7 @@ class StreamingHandler:
 
 def setup_ui():
     """设置用户界面"""
-    st.title("🧠 新质向阳多智能体自动架构平台")
+    st.title("🧠 Sage多智能体自动架构平台")
     st.markdown("**智能多智能体协作平台**")
     
     # 获取全局配置
@@ -300,7 +300,7 @@ def setup_ui():
         use_multi_agent = st.toggle('🤖 启用多智能体推理', 
                                    value=True)
         use_deepthink = st.toggle('🧠 启用深度思考', 
-                                 value=settings.agent.enable_deep_thinking)
+                                 value=False)
         
         # 系统信息
         st.subheader("📊 系统信息")
