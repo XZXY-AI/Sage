@@ -292,45 +292,49 @@ def setup_ui():
     # 获取全局配置
     settings = get_settings()
     
-    # 侧边栏设置
-    with st.sidebar:
-        st.header("⚙️ 设置")
-        
-        # 多智能体选项
-        use_multi_agent = st.toggle('🤖 启用多智能体推理', 
-                                   value=True)
-        use_deepthink = st.toggle('🧠 启用深度思考', 
-                                 value=False)
-        
-        # 系统信息
-        st.subheader("📊 系统信息")
-        st.info(f"**模型**: {settings.model.model_name}")
-        st.info(f"**温度**: {settings.model.temperature}")
-        st.info(f"**最大标记**: {settings.model.max_tokens}")
-        st.info(f"**环境**: {settings.environment}")
-        
-        # 工具列表
-        if st.session_state.get('tool_manager'):
-            display_tools(st.session_state.tool_manager)
-        
-        # 清除历史按钮
-        if st.button("🗑️ 清除对话历史", type="secondary"):
-            clear_history()
+    # 侧边栏设置 - 已隐藏
+    # with st.sidebar:
+    #     st.header("⚙️ 设置")
+    #     
+    #     # 多智能体选项
+    #     use_multi_agent = st.toggle('🤖 启用多智能体推理', 
+    #                                value=False)
+    #     use_deepthink = st.toggle('🧠 启用深度思考', 
+    #                              value=False)
+    #     
+    #     # 系统信息
+    #     st.subheader("📊 系统信息")
+    #     st.info(f"**模型**: {settings.model.model_name}")
+    #     st.info(f"**温度**: {settings.model.temperature}")
+    #     st.info(f"**最大标记**: {settings.model.max_tokens}")
+    #     st.info(f"**环境**: {settings.environment}")
+    #     
+    #     # 工具列表
+    #     if st.session_state.get('tool_manager'):
+    #         display_tools(st.session_state.tool_manager)
+    #     
+    #     # 清除历史按钮
+    #     if st.button("🗑️ 清除对话历史", type="secondary"):
+    #         clear_history()
+    
+    # 设置默认值（原来从侧边栏获取）
+    use_multi_agent = False
+    use_deepthink = False
     
     return use_multi_agent, use_deepthink
 
 
-def display_tools(tool_manager: ToolManager):
-    """显示可用工具"""
-    st.subheader("🛠️ 可用工具")
-    tools = tool_manager.list_tools_simplified()
-    
-    if tools:
-        for tool_info in tools:
-            with st.expander(f"🔧 {tool_info['name']}", expanded=False):
-                st.write(tool_info['description'])
-    else:
-        st.info("暂无可用工具")
+# def display_tools(tool_manager: ToolManager):
+#     """显示可用工具"""
+#     st.subheader("🛠️ 可用工具")
+#     tools = tool_manager.list_tools_simplified()
+#     
+#     if tools:
+#         for tool_info in tools:
+#             with st.expander(f"🔧 {tool_info['name']}", expanded=False):
+#                 st.write(tool_info['description'])
+#     else:
+#         st.info("暂无可用工具")
 
 
 def clear_history():
