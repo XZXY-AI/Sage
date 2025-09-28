@@ -546,7 +546,7 @@ def parse_arguments() -> Dict[str, Any]:
                        default='gpt-4.1',
                        help='模型名称')
     parser.add_argument('--base_url', 
-                       default='https://openai-api-aiapp-usest.openai.azure.com',
+                       default='https://openai-api-aiapp-usest.openai.azure.com/',
                        help='Azure OpenAI endpoint')
     parser.add_argument('--tools_folders', nargs='+', default=[],
                        help='工具目录路径（多个路径用空格分隔）')
