@@ -375,7 +375,7 @@ def process_user_input(user_input: str, tool_manager: ToolManager, controller: A
     
     # 如果是首次输入，拼接预制提示词
     if st.session_state.is_first_input:
-        actual_input = PREDEFINED_PROMPT + user_input
+        actual_input = user_input
         st.session_state.is_first_input = False
     else:
         actual_input = user_input
